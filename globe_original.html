@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Globe Visualization</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400..800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <header>
+      <h1>wigglydoom</h1>
+    </header>
+    <div id="controls">
+     
+      <label for="colorMode">
+        <span>Color Mode:</span>
+        <select id="colorMode">
+          <option value="rainbow">Rainbow</option>
+          <option value="pinkpurple">Pink & Purple</option>
+          <option value="goldmagenta">Gold & Royal Blue</option>
+          <option value="cyanlime">Cyan & Lime Green</option>
+        </select>
+      </label>
+      <label for="shapeSelect">
+        <span>Shape:</span>
+        <select id="shapeSelect">
+          <option value="sphere">Sphere</option>
+          <option value="cube">Cube</option>
+          <option value="pyramid">Pyramid</option>
+          <option value="randomSphere">Random Sphere</option>
+          <option value="cylinder">Cylinder</option>
+        </select>
+      </label>
+     
+      <label for="objectSize">
+        <span>Zoom:</span>
+        <input type="range" id="objectSize" min="0.5" max="8" value="2" step="0.1">
+      </label>
+      <label for="rotationSpeedX">
+        <span>X Rotation:</span>
+        <input type="range" id="rotationSpeedX" value="0" min="0" max="10" step=".05">
+      </label>
+      <label for="rotationSpeedY">
+        <span>Y Rotation:</span>
+        <input type="range" id="rotationSpeedY" value="0" min="0" max="10" step=".05">
+      </label>
+      <label for="rotationSpeedZ">
+        <span>Z Rotation:</span>
+        <input type="range" id="rotationSpeedZ" value="0" min="0" max="10" step=".05">
+      </label>
+      <label for="rippleIntensity">
+        <span>Wiggly Intensity:</span>
+        <input type="range" id="rippleIntensity" value="0" min="0" max="100" step="0.1">
+      </label>
+      <label for="rippleSpeed">
+        <span>Wiggly Speed:</span>
+        <input type="range" id="rippleSpeed" value="0" min="0" max="20" step="0.5">
+      </label>
+      <label for="gradientStart">
+        <span>Gradient Start:</span>
+        <input type="range" id="gradientStart" min="-4" max="4" value="-2" step="0.1">
+      </label>
+      <label for="gradientEnd">
+        <span>Gradient End:</span>
+        <input type="range" id="gradientEnd" min="-4" max="4" value="2" step="0.1">
+      </label>
+      <button id="resetButton">Reset</button>
+      <button id="toggleVoice" style="width: 100%; margin-top: 10px; padding: 8px; font-weight: bold; border: 1px solid white; background-color: rgba(255, 255, 255, 0.1); color: white;">
+        <span id="voiceButtonText">Enable Voice Control</span>
+      </button>
+      <div id="voiceIndicator" style="display: none; width: 100%; height: 8px; margin-top: 5px;">
+        <div class="voice-meter" style="width: 100%; height: 8px; background-color: rgba(255, 255, 255, 0.2); border-radius: 4px; overflow: hidden;">
+          <div id="voiceMeterFill" style="height: 100%; width: 0%; background: linear-gradient(to right, #00ffff, #ff00ff); transition: width 0.1s ease-out;"></div>
+        </div>
+      </div>
+      <!-- <button id="getCameraPosition">Copy Camera Position</button>
+      <button id="refreshButton">Refresh</button> -->
+    </div>
+   
+    <!-- <p>why the name? because i couldn't afford jellyfish.com</p>
+    <p>Like this? Buy me a coffee</p> -->
+
+    <!-- Include Three.js from a CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+    <script>
+      // Create the scene, camera, and renderer
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+      );
+      camera.position.z = 5;
+      
+      // Create a vector to store the camera's target point (the origin)
+      const cameraTarget = new THREE.Vector3(0, 0, 0);
+      
+      // Function to update camera look at after position changes
+      const updateCameraOrientation = () => {
+        camera.lookAt(cameraTarget);
+      };
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setClearColor(0x000000, 0);
+      document.body.appendChild(renderer.domElement);
+
+      // Function to create a circular texture for points
+      function createCircleTexture() {
+        const canvas = document.createElement('canvas');
+        const size = 128; // Increased size for better quality
+        canvas.width = size;
+        canvas.height = size;
+        
+        const context = canvas.getContext('2d');
+        context.imageSmoothingEnabled = true;
+        
+        // Clear the canvas
+        context.fillStyle = 'rgba(0,0,0,0)';
+        context.fillRect(0, 0, size, size);
+        
+        // Create a radial gradient for smooth edges
+        const gradient = context.createRadialGradient(
+          size/2, size/2, 0,
+          size/2, size/2, size/2
+        );
+        gradient.addColorStop(0, 'rgba(255,255,255,1)');
+        gradient.addColorStop(0.8, 'rgba(255,255,255,0.8)');
+        gradient.addColorStop(1, 'rgba(255,255,255,0)');
+        
+        // Draw the circle with the gradient
+        context.fillStyle = gradient;
+        context.beginPath();
+        context.arc(size/2, size/2, size/2, 0, Math.PI * 2, false);
+        context.fill();
+        
+        const texture = new THREE.Texture(canvas);
+        texture.needsUpdate = true;
+        return texture;
+      }
+
+      // Custom shader material for rainbow animation
+      const customShaderMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          time: { value: 0 },
+          colorMode: { value: 0 },
+          rippleSpeed: { value: 1.0 },
+          rippleIntensity: { value: 0.0 },
+          pulseTime: { value: 0 },
+          pulseCenter: { value: new THREE.Vector3(0, 0, 0) },
+          gradientStart: { value: -2.0 },  // Add control for gradient start
+          gradientEnd: { value: 2.0 }      // Add control for gradient end
+        },
+        vertexShader: `
+          uniform float time;
+          uniform float rippleSpeed;
+          uniform float rippleIntensity;
+          uniform float pulseTime;
+          uniform vec3 pulseCenter;
+          
+          varying vec3 vPosition;
+          varying float vColorFactor;
+
+          void main() {
+            vPosition = position;
+            
+            // Calculate wave effect with intensity control
+            float frequency = 2.0;
+            float waveHeight = 0.1 * rippleIntensity;
+            float wave = sin(frequency * position.x + time * rippleSpeed) * 
+                        sin(frequency * position.y + time * rippleSpeed) * 
+                        sin(frequency * position.z + time * rippleSpeed);
+            
+            // Apply wave to position based on intensity
+            vec3 newPosition = position * (1.0 + wave * waveHeight);
+            
+            // Calculate pulse effect
+            float distanceToPulse = distance(position, pulseCenter);
+            float pulseEffect = pulseTime * smoothstep(0.5, 0.0, distanceToPulse);
+            
+            // Apply pulse to position
+            newPosition += normalize(position) * pulseEffect * 0.2;
+            
+            // Pass color factor to fragment shader
+            vColorFactor = wave;
+
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
+            gl_PointSize = 2.0;
+          }
+        `,
+        fragmentShader: `
+          uniform float time;
+          uniform int colorMode;
+          uniform float gradientStart;
+          uniform float gradientEnd;
+          
+          varying vec3 vPosition;
+          varying float vColorFactor;
+
+          vec3 rainbow(float t) {
+            vec3 a = vec3(0.5, 0.5, 0.5);
+            vec3 b = vec3(0.5, 0.5, 0.5);
+            vec3 c = vec3(1.0, 1.0, 1.0);
+            vec3 d = vec3(0.00, 0.33, 0.67);
+
+            return a + b * cos(6.28318 * (c * t + d));
+          }
+
+          void main() {
+            float t = time * 0.5;
+            vec3 color;
+            
+            if (colorMode == 0) {
+              // Rainbow flow
+              float colorFactor = vColorFactor + t;
+              color = rainbow(colorFactor);
+            } else if (colorMode == 1) {
+              // Pink and Purple gradient
+              float gradientFactor = (vPosition.y - gradientStart) / (gradientEnd - gradientStart);
+              gradientFactor = clamp(gradientFactor, 0.0, 1.0);  // Ensure value stays between 0 and 1
+              vec3 pink = vec3(1.0, 0.161, 0.765);  // #FF29C3
+              vec3 purple = vec3(0.5, 0.0, 1.0);
+              color = mix(purple, pink, gradientFactor);
+            } else if (colorMode == 2) {
+              // Gold and Blue gradient
+              float gradientFactor = (vPosition.y - gradientStart) / (gradientEnd - gradientStart);
+              gradientFactor = clamp(gradientFactor, 0.0, 1.0);
+              vec3 gold = vec3(0.996, 0.788, 0.255);  // #FEC941
+              vec3 blue = vec3(0.0, 0.522, 1.0);  // #0085FF
+              color = mix(blue, gold, gradientFactor);
+            } else if (colorMode == 3) {
+              // Cyan and Lime Green gradient
+              float gradientFactor = (vPosition.y - gradientStart) / (gradientEnd - gradientStart);
+              gradientFactor = clamp(gradientFactor, 0.0, 1.0);
+              vec3 cyan = vec3(0.0, 1.0, 1.0);
+              vec3 lime = vec3(0.5, 1.0, 0.0);
+              color = mix(cyan, lime, gradientFactor);
+            }
+
+            gl_FragColor = vec4(color, 1.0);
+          }
+        `,
+        transparent: true,
+        depthWrite: false,
+        alphaTest: 0.1
+      });
+
+      // Function to create geometries
+      function createGeometry(shape, size = 2) {
+        switch(shape) {
+          case 'sphere':
+            return new THREE.SphereGeometry(size, 64, 64);
+          case 'randomSphere':
+            const points = [];
+            const numPoints = 5000; // More points for better coverage
+            
+            for (let i = 0; i < numPoints; i++) {
+              // Generate random spherical coordinates
+              const theta = Math.random() * Math.PI * 2; // Azimuthal angle (around y-axis)
+              const phi = Math.acos(2 * Math.random() - 1); // Polar angle (from y-axis)
+              
+              // Add some random variation to the radius
+              const radius = size * (0.9 + Math.random() * 0.2); // Varies between 0.9 and 1.1 times size
+              
+              // Convert spherical to Cartesian coordinates
+              const x = radius * Math.sin(phi) * Math.cos(theta);
+              const y = radius * Math.cos(phi);
+              const z = radius * Math.sin(phi) * Math.sin(theta);
+              
+              points.push(x, y, z);
+            }
+            
+            const randomSphereGeometry = new THREE.BufferGeometry();
+            randomSphereGeometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+            return randomSphereGeometry;
+          case 'cube':
+            // Create a cube with similar point density to sphere
+            const segments = 32;
+            const geometry = new THREE.BoxGeometry(size * 1.5, size * 1.5, size * 1.5, segments, segments, segments);
+            // Convert to vertices only
+            const positions = geometry.attributes.position.array;
+            const vertices = new Float32Array(positions.length);
+            for (let i = 0; i < positions.length; i++) {
+              vertices[i] = positions[i];
+            }
+            const pointGeometry = new THREE.BufferGeometry();
+            pointGeometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            return pointGeometry;
+          case 'pyramid':
+            // Create a pyramid with good point distribution
+            const pyramidGeometry = new THREE.ConeGeometry(size, size * 2, 64, 64);
+            const pyramidPositions = pyramidGeometry.attributes.position.array;
+            const pyramidVertices = new Float32Array(pyramidPositions.length);
+            for (let i = 0; i < pyramidPositions.length; i++) {
+              pyramidVertices[i] = pyramidPositions[i];
+            }
+            const pyramidPointGeometry = new THREE.BufferGeometry();
+            pyramidPointGeometry.setAttribute('position', new THREE.BufferAttribute(pyramidVertices, 3));
+            return pyramidPointGeometry;
+          case 'cylinder':
+            // Create a cylinder with high detail for point distribution
+            const cylinderGeometry = new THREE.CylinderGeometry(size * 0.7, size * 0.7, size * 2, 32, 32);
+            const cylinderPositions = cylinderGeometry.attributes.position.array;
+            
+            // Add additional points for denser distribution
+            const cylinderExtraPoints = [];
+            for (let i = 0; i < cylinderPositions.length; i += 9) {
+              const v1 = new THREE.Vector3(
+                cylinderPositions[i],
+                cylinderPositions[i + 1],
+                cylinderPositions[i + 2]
+              );
+              const v2 = new THREE.Vector3(
+                cylinderPositions[i + 3],
+                cylinderPositions[i + 4],
+                cylinderPositions[i + 5]
+              );
+              const v3 = new THREE.Vector3(
+                cylinderPositions[i + 6],
+                cylinderPositions[i + 7],
+                cylinderPositions[i + 8]
+              );
+              
+              // Add midpoints and interpolated points
+              const m1 = v1.clone().lerp(v2, 0.33);
+              const m2 = v2.clone().lerp(v3, 0.33);
+              const m3 = v3.clone().lerp(v1, 0.33);
+              const m4 = v1.clone().lerp(v2, 0.66);
+              const m5 = v2.clone().lerp(v3, 0.66);
+              const m6 = v3.clone().lerp(v1, 0.66);
+              
+              // Add points to array
+              cylinderExtraPoints.push(
+                m1.x, m1.y, m1.z,
+                m2.x, m2.y, m2.z,
+                m3.x, m3.y, m3.z,
+                m4.x, m4.y, m4.z,
+                m5.x, m5.y, m5.z,
+                m6.x, m6.y, m6.z
+              );
+            }
+            
+            // Combine original vertices with extra points
+            const cylinderVertices = new Float32Array(cylinderPositions.length + cylinderExtraPoints.length);
+            cylinderVertices.set(cylinderPositions);
+            cylinderVertices.set(cylinderExtraPoints, cylinderPositions.length);
+            
+            const cylinderPointGeometry = new THREE.BufferGeometry();
+            cylinderPointGeometry.setAttribute('position', new THREE.BufferAttribute(cylinderVertices, 3));
+            return cylinderPointGeometry;
+        }
+      }
+
+      // Create initial geometry and points
+      let currentShape = 'sphere';
+      const geometry = createGeometry(currentShape, 2);
+      const dotGlobe = new THREE.Points(geometry, customShaderMaterial);
+      
+      // Add the globe to the scene
+      scene.add(dotGlobe);
+
+      // Voice input variables
+      let audioContext;
+      let analyser;
+      let microphone;
+      let javascriptNode;
+      let isVoiceControlActive = false;
+      let voiceDataArray;
+      
+      // Function to initialize audio context and microphone
+      async function setupVoiceInput() {
+        try {
+          // Create audio context
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          
+          // Get microphone access
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          
+          // Create analyser node
+          analyser = audioContext.createAnalyser();
+          analyser.fftSize = 256;
+          analyser.smoothingTimeConstant = 0.8;
+          
+          // Connect microphone to analyser
+          microphone = audioContext.createMediaStreamSource(stream);
+          microphone.connect(analyser);
+          
+          // Create buffer to receive data
+          voiceDataArray = new Uint8Array(analyser.frequencyBinCount);
+          
+          // Show voice indicator
+          document.getElementById('voiceIndicator').style.display = 'block';
+          document.getElementById('voiceButtonText').textContent = 'Disable Voice Control';
+          
+          isVoiceControlActive = true;
+          
+          return true;
+        } catch (error) {
+          console.error('Error accessing microphone:', error);
+          alert('Could not access microphone. Please check permissions and try again.');
+          return false;
+        }
+      }
+      
+      // Function to stop voice input
+      function stopVoiceInput() {
+        if (microphone && microphone.mediaStream) {
+          microphone.mediaStream.getTracks().forEach(track => track.stop());
+        }
+        
+        if (audioContext && audioContext.state !== 'closed') {
+          audioContext.close();
+        }
+        
+        document.getElementById('voiceIndicator').style.display = 'none';
+        document.getElementById('voiceButtonText').textContent = 'Enable Voice Control';
+        
+        // Reset to slider values
+        updateRippleIntensity();
+        updateRippleSpeed();
+        
+        isVoiceControlActive = false;
+      }
+      
+      // Function to process voice input and update wiggle parameters
+      function processVoiceInput() {
+        if (!isVoiceControlActive || !analyser) return;
+        
+        // Get frequency data
+        analyser.getByteFrequencyData(voiceDataArray);
+        
+        // Calculate average volume
+        let sum = 0;
+        for (let i = 0; i < voiceDataArray.length; i++) {
+          sum += voiceDataArray[i];
+        }
+        const averageVolume = sum / voiceDataArray.length;
+        
+        // Map volume to wiggle intensity (0-100) and speed (0-20)
+        const normalizedVolume = Math.min(100, averageVolume * 2); // Scale up for better sensitivity
+        
+        // Update UI meter
+        const meterFill = document.getElementById('voiceMeterFill');
+        meterFill.style.width = `${normalizedVolume}%`;
+        
+        // Only update if volume is above threshold to avoid noise
+        if (normalizedVolume > 5) {
+          // Set wiggle intensity based on volume
+          customShaderMaterial.uniforms.rippleIntensity.value = normalizedVolume / 100;
+          
+          // Set wiggle speed based on volume (scaled differently)
+          customShaderMaterial.uniforms.rippleSpeed.value = (normalizedVolume / 100) * 10;
+        }
+      }
+      
+      // Add shape change listener
+      document.getElementById('shapeSelect').addEventListener('change', function(e) {
+        currentShape = e.target.value;
+        const size = parseFloat(document.getElementById('objectSize').value);
+        const newGeometry = createGeometry(currentShape, size);
+        dotGlobe.geometry.dispose(); // Clean up old geometry
+        dotGlobe.geometry = newGeometry;
+      });
+
+      // Add size change listener
+      document.getElementById('objectSize').addEventListener('input', function(e) {
+        const size = parseFloat(e.target.value);
+        const newGeometry = createGeometry(currentShape, size);
+        dotGlobe.geometry.dispose(); // Clean up old geometry
+        dotGlobe.geometry = newGeometry;
+      });
+
+      // Add color mode change listener
+      document.getElementById('colorMode').addEventListener('change', function(e) {
+        if (e.target.value === 'rainbow') {
+          customShaderMaterial.uniforms.colorMode.value = 0;
+        } else if (e.target.value === 'pinkpurple') {
+          customShaderMaterial.uniforms.colorMode.value = 1;
+        } else if (e.target.value === 'goldmagenta') {
+          customShaderMaterial.uniforms.colorMode.value = 2;
+        } else if (e.target.value === 'cyanlime') {
+          customShaderMaterial.uniforms.colorMode.value = 3;
+        }
+      });
+
+      // Add ripple speed change listener
+      document.getElementById('rippleSpeed').addEventListener('input', function(e) {
+        customShaderMaterial.uniforms.rippleSpeed.value = Math.max(0, parseFloat(e.target.value));
+      });
+
+      // Replace the single rotation speed listener with three separate ones
+      let rotationSpeedX = 0;
+      let rotationSpeedY = 0;
+      let rotationSpeedZ = 0;
+
+      document.getElementById('rotationSpeedX').addEventListener('input', function(e) {
+        rotationSpeedX = parseFloat(e.target.value);
+      });
+
+      document.getElementById('rotationSpeedY').addEventListener('input', function(e) {
+        rotationSpeedY = parseFloat(e.target.value);
+      });
+
+      document.getElementById('rotationSpeedZ').addEventListener('input', function(e) {
+        rotationSpeedZ = parseFloat(e.target.value);
+      });
+
+      // Variables to handle mouse drag rotation
+      let isDragging = false;
+      let previousMousePosition = { x: 0, y: 0 };
+      let velocity = { x: 0, y: 0, z: 0 };
+
+      // Mouse down event: start dragging
+      renderer.domElement.addEventListener("mousedown", function (e) {
+        isDragging = true;
+        previousMousePosition = {
+          x: e.clientX,
+          y: e.clientY
+        };
+        velocity = { x: 0, y: 0, z: 0 }; // Reset velocity on new drag
+      });
+
+      // Mouse move event: if dragging, rotate the globe based on mouse movement
+      renderer.domElement.addEventListener("mousemove", function (e) {
+        if (!isDragging) return;
+
+        const deltaMove = {
+          x: e.clientX - previousMousePosition.x,
+          y: e.clientY - previousMousePosition.y
+        };
+
+        const rotateSpeed = 0.002;
+        dotGlobe.rotation.y += deltaMove.x * rotateSpeed;
+        dotGlobe.rotation.x += deltaMove.y * rotateSpeed;
+        
+        // Add z-axis rotation based on the combination of x and y movements
+        dotGlobe.rotation.z += (deltaMove.x + deltaMove.y) * rotateSpeed * 0.5;
+
+        // Update velocity based on mouse movement
+        velocity.x = deltaMove.x * rotateSpeed;
+        velocity.y = deltaMove.y * rotateSpeed;
+        velocity.z = (deltaMove.x + deltaMove.y) * rotateSpeed * 0.5;
+
+        previousMousePosition = {
+          x: e.clientX,
+          y: e.clientY
+        };
+      });
+
+      // Mouse up & mouse leave events: stop dragging
+      renderer.domElement.addEventListener("mouseup", function () {
+        isDragging = false;
+      });
+      renderer.domElement.addEventListener("mouseleave", function () {
+        isDragging = false;
+      });
+
+      let time = 0;
+      function animate() {
+        requestAnimationFrame(animate);
+
+        time += 0.01;
+        customShaderMaterial.uniforms.time.value = time;
+
+        // Apply rotation speeds for each axis
+        dotGlobe.rotation.x += rotationSpeedX / 100;
+        dotGlobe.rotation.y += rotationSpeedY / 100;
+        dotGlobe.rotation.z += rotationSpeedZ / 100;
+
+        // Apply inertia effect after dragging
+        if (!isDragging) {
+          dotGlobe.rotation.y += velocity.x;
+          dotGlobe.rotation.x += velocity.y;
+          dotGlobe.rotation.z += velocity.z;
+
+          // Decelerate velocity
+          velocity.x *= 0.95;
+          velocity.y *= 0.95;
+          velocity.z *= 0.95;
+
+          // Stop the globe if the velocity is very low
+          if (Math.abs(velocity.x) < 0.001 && Math.abs(velocity.y) < 0.001 && Math.abs(velocity.z) < 0.001) {
+            velocity.x = 0;
+            velocity.y = 0;
+            velocity.z = 0;
+          }
+        }
+
+        // Process voice input if active
+        if (isVoiceControlActive) {
+          processVoiceInput();
+        }
+
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      // Adjust the scene when the window is resized.
+      window.addEventListener("resize", onWindowResize, false);
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      document.addEventListener('DOMContentLoaded', function() {
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        
+        // Set camera position if provided in URL
+        const x = parseFloat(urlParams.get('x'));
+        const y = parseFloat(urlParams.get('y'));
+        const z = parseFloat(urlParams.get('z'));
+        
+        if (!isNaN(x)) camera.position.x = x;
+        if (!isNaN(y)) camera.position.y = y;
+        if (!isNaN(z)) camera.position.z = z;
+        
+        // Ensure camera looks at center after setting position from URL
+        updateCameraOrientation();
+        
+        // Set color mode
+        const colorMode = urlParams.get('colorMode');
+        if (colorMode) {
+          document.getElementById('colorMode').value = colorMode;
+          customShaderMaterial.uniforms.colorMode.value = {
+            'rainbow': 0,
+            'pinkpurple': 1,
+            'goldmagenta': 2,
+            'cyanlime': 3
+          }[colorMode] || 0;
+        }
+
+        // Set shape
+        const shape = urlParams.get('shape');
+        if (shape) {
+          document.getElementById('shapeSelect').value = shape;
+          currentShape = shape;
+          dotGlobe.geometry = createGeometry(shape, parseFloat(document.getElementById('objectSize').value));
+        }
+
+        // Set numeric controls
+        const numericControls = {
+          'zoom': 'objectSize',
+          'rotationX': 'rotationSpeedX',
+          'rotationY': 'rotationSpeedY',
+          'rotationZ': 'rotationSpeedZ',
+          'rippleIntensity': 'rippleIntensity',
+          'rippleSpeed': 'rippleSpeed'
+        };
+
+        Object.entries(numericControls).forEach(([paramName, elementId]) => {
+          const value = urlParams.get(paramName);
+          if (value !== null) {
+            const element = document.getElementById(elementId);
+            element.value = value;
+            // Trigger the input event to update the visualization
+            element.dispatchEvent(new Event('input'));
+          }
+        });
+
+        // Update URL when controls change
+        const updateURL = () => {
+          const params = new URLSearchParams();
+          
+          // Add current values to URL parameters
+          params.set('colorMode', document.getElementById('colorMode').value);
+          params.set('shape', document.getElementById('shapeSelect').value);
+          params.set('zoom', document.getElementById('objectSize').value);
+          params.set('rotationX', document.getElementById('rotationSpeedX').value);
+          params.set('rotationY', document.getElementById('rotationSpeedY').value);
+          params.set('rotationZ', document.getElementById('rotationSpeedZ').value);
+          params.set('rippleIntensity', document.getElementById('rippleIntensity').value);
+          params.set('rippleSpeed', document.getElementById('rippleSpeed').value);
+          
+          // Add camera position to URL
+          params.set('x', camera.position.x.toFixed(2));
+          params.set('y', camera.position.y.toFixed(2));
+          params.set('z', camera.position.z.toFixed(2));
+          
+          // Update URL without reloading the page
+          window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+        };
+
+        // Add change listeners to all controls
+        ['colorMode', 'shapeSelect', 'objectSize', 'rotationSpeedX', 'rotationSpeedY', 
+         'rotationSpeedZ', 'rippleIntensity', 'rippleSpeed'].forEach(id => {
+          document.getElementById(id).addEventListener('input', updateURL);
+        });
+
+        // Add orbit controls for camera manipulation
+        let isDraggingCamera = false;
+        let previousMousePositionCamera = {
+          x: 0,
+          y: 0
+        };
+
+        renderer.domElement.addEventListener('mousedown', (e) => {
+          isDraggingCamera = true;
+          previousMousePositionCamera = {
+            x: e.clientX,
+            y: e.clientY
+          };
+        });
+
+        renderer.domElement.addEventListener('mousemove', (e) => {
+          if (!isDraggingCamera) return;
+
+          const deltaMove = {
+            x: e.clientX - previousMousePositionCamera.x,
+            y: e.clientY - previousMousePositionCamera.y
+          };
+
+          // Convert delta movements to spherical coordinates
+          const rotationSpeed = 0.01;
+          
+          // Calculate the camera's current spherical coordinates
+          const radius = camera.position.length();
+          let theta = Math.atan2(camera.position.x, camera.position.z);
+          let phi = Math.acos(camera.position.y / radius);
+          
+          // Update angles based on mouse movement
+          theta += deltaMove.x * rotationSpeed;
+          phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi + deltaMove.y * rotationSpeed));
+          
+          // Convert back to Cartesian coordinates
+          camera.position.x = radius * Math.sin(phi) * Math.sin(theta);
+          camera.position.y = radius * Math.cos(phi);
+          camera.position.z = radius * Math.sin(phi) * Math.cos(theta);
+          
+          // Ensure camera looks at the center
+          updateCameraOrientation();
+          
+          previousMousePositionCamera = {
+            x: e.clientX,
+            y: e.clientY
+          };
+
+          updateURL();
+        });
+
+        renderer.domElement.addEventListener('mouseup', () => {
+          isDraggingCamera = false;
+        });
+
+        renderer.domElement.addEventListener('mouseleave', () => {
+          isDraggingCamera = false;
+        });
+
+        // Add "Copy Camera Position" button functionality
+        document.getElementById('getCameraPosition').addEventListener('click', () => {
+          const positionString = `x=${camera.position.x.toFixed(2)}&y=${camera.position.y.toFixed(2)}&z=${camera.position.z.toFixed(2)}`;
+          navigator.clipboard.writeText(positionString).then(() => {
+            alert('Camera position copied to clipboard!');
+          });
+        });
+      });
+
+      // Add the event listener for the intensity slider
+      document.getElementById('rippleIntensity').addEventListener('input', function(e) {
+        customShaderMaterial.uniforms.rippleIntensity.value = parseFloat(e.target.value) / 10.0; // Scale down to 0-1 range
+      });
+
+      // Add event listeners for gradient controls
+      document.getElementById('gradientStart').addEventListener('input', (e) => {
+        customShaderMaterial.uniforms.gradientStart.value = parseFloat(e.target.value);
+      });
+      document.getElementById('gradientEnd').addEventListener('input', (e) => {
+        customShaderMaterial.uniforms.gradientEnd.value = parseFloat(e.target.value);
+      });
+
+      // Reset function
+      function resetAll() {
+        // Reset sliders
+        document.getElementById('rippleSpeed').value = 0;
+        document.getElementById('rippleIntensity').value = 0;
+        document.getElementById('objectSize').value = 2;
+        document.getElementById('rotationSpeedX').value = 0;
+        document.getElementById('rotationSpeedY').value = 0;
+        document.getElementById('rotationSpeedZ').value = 0;
+        document.getElementById('colorMode').value = 'rainbow';
+        document.getElementById('shapeSelect').value = 'sphere';
+
+        // Reset material uniforms
+        customShaderMaterial.uniforms.rippleSpeed.value = 0;
+        customShaderMaterial.uniforms.rippleIntensity.value = 0;
+        customShaderMaterial.uniforms.colorMode.value = 0;
+
+        // Reset object position and scale
+        dotGlobe.scale.set(1, 1, 1);
+        dotGlobe.rotation.set(0, 0, 0);
+
+        // Trigger input events to update visuals
+        document.getElementById('rippleSpeed').dispatchEvent(new Event('input'));
+        document.getElementById('rippleIntensity').dispatchEvent(new Event('input'));
+        document.getElementById('objectSize').dispatchEvent(new Event('input'));
+        document.getElementById('rotationSpeedX').dispatchEvent(new Event('input'));
+        document.getElementById('rotationSpeedY').dispatchEvent(new Event('input'));
+        document.getElementById('rotationSpeedZ').dispatchEvent(new Event('input'));
+        document.getElementById('colorMode').dispatchEvent(new Event('change'));
+        document.getElementById('shapeSelect').dispatchEvent(new Event('change'));
+      }
+
+      // Add reset button listener
+      document.getElementById('resetButton').addEventListener('click', resetAll);
+
+      // Add refresh button listener
+      document.getElementById('refreshButton').addEventListener('click', () => {
+        window.location.reload();
+      });
+
+      // Add voice control toggle button listener
+      document.getElementById('toggleVoice').addEventListener('click', function() {
+        if (isVoiceControlActive) {
+          stopVoiceInput();
+        } else {
+          setupVoiceInput();
+        }
+      });
+    </script>
+  </body>
+</html>
