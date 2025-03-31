@@ -39,6 +39,7 @@
           <option value="pyramid">Pyramid</option>
           <option value="randomSphere">Random Sphere</option>
           <option value="cylinder">Cylinder</option>
+          <option value="face">Face</option>
         </select>
       </label>
      
@@ -159,7 +160,9 @@
           pulseTime: { value: 0 },
           pulseCenter: { value: new THREE.Vector3(0, 0, 0) },
           gradientStart: { value: -2.0 },  // Add control for gradient start
-          gradientEnd: { value: 2.0 }      // Add control for gradient end
+          gradientEnd: { value: 2.0 },     // Add control for gradient end
+          voiceMode: { value: 0.0 },       // Add voice mode flag
+          mouthYPosition: { value: -0.3 }  // Y position of mouth for face shape
         },
         vertexShader: `
           uniform float time;
@@ -167,6 +170,8 @@
           uniform float rippleIntensity;
           uniform float pulseTime;
           uniform vec3 pulseCenter;
+          uniform float voiceMode;
+          uniform float mouthYPosition;
           
           varying vec3 vPosition;
           varying float vColorFactor;
@@ -181,8 +186,20 @@
                         sin(frequency * position.y + time * rippleSpeed) * 
                         sin(frequency * position.z + time * rippleSpeed);
             
-            // Apply wave to position based on intensity
-            vec3 newPosition = position * (1.0 + wave * waveHeight);
+            vec3 newPosition = position;
+            
+            // Check if we're in voice mode and this is a face shape
+            if (voiceMode > 0.5) {
+              // Only animate mouth vertices (y position near mouth height with some tolerance)
+              float mouthTolerance = 0.2;
+              if (abs(position.y - mouthYPosition) < mouthTolerance) {
+                // Apply wave effect only to mouth
+                newPosition = position * (1.0 + wave * waveHeight);
+              }
+            } else {
+              // Normal mode - apply wave to all vertices
+              newPosition = position * (1.0 + wave * waveHeight);
+            }
             
             // Calculate pulse effect
             float distanceToPulse = distance(position, pulseCenter);
@@ -310,6 +327,86 @@
             const pyramidPointGeometry = new THREE.BufferGeometry();
             pyramidPointGeometry.setAttribute('position', new THREE.BufferAttribute(pyramidVertices, 3));
             return pyramidPointGeometry;
+          case 'face':
+            // Create a face shape with features
+            const facePoints = [];
+            const facePointCount = 5000 * density;
+            
+            // Remove the head sphere and only keep facial features
+            
+            // Add eyes (two small spheres)
+            const eyeSize = size * 0.15;
+            const eyeDistance = size * 0.3;
+            const eyeHeight = size * 0.1;
+            const eyeDepth = size * 0.0;
+            
+            // Left eye
+            for (let i = 0; i < facePointCount * 0.2; i++) {
+              const theta = Math.random() * Math.PI * 2;
+              const phi = Math.acos(2 * Math.random() - 1);
+              const radius = eyeSize * (0.8 + Math.random() * 0.4);
+              
+              const x = -eyeDistance + radius * Math.sin(phi) * Math.cos(theta);
+              const y = eyeHeight + radius * Math.cos(phi);
+              const z = eyeDepth + radius * Math.sin(phi) * Math.sin(theta);
+              
+              facePoints.push(x, y, z);
+            }
+            
+            // Right eye
+            for (let i = 0; i < facePointCount * 0.2; i++) {
+              const theta = Math.random() * Math.PI * 2;
+              const phi = Math.acos(2 * Math.random() - 1);
+              const radius = eyeSize * (0.8 + Math.random() * 0.4);
+              
+              const x = eyeDistance + radius * Math.sin(phi) * Math.cos(theta);
+              const y = eyeHeight + radius * Math.cos(phi);
+              const z = eyeDepth + radius * Math.sin(phi) * Math.sin(theta);
+              
+              facePoints.push(x, y, z);
+            }
+            
+            // Add nose (cone shape)
+            const noseSize = size * 0.15;
+            const noseHeight = size * 0.0;
+            const noseDepth = size * 0.0;
+            
+            for (let i = 0; i < facePointCount * 0.2; i++) {
+              const t = Math.random();
+              const theta = Math.random() * Math.PI * 2;
+              const radius = noseSize * (1 - t) * Math.random();
+              
+              const x = radius * Math.cos(theta);
+              const y = noseHeight - t * noseSize * 0.7;
+              const z = noseDepth + t * noseSize * 1.2;
+              
+              facePoints.push(x, y, z);
+            }
+            
+            // Add mouth (curved line)
+            const mouthWidth = size * 0.5;
+            const mouthHeight = size * -0.3;
+            const mouthDepth = size * 0.0;
+            const mouthCurve = size * 0.1;
+            
+            // Update the mouth Y position in the shader uniform
+            customShaderMaterial.uniforms.mouthYPosition.value = mouthHeight;
+            
+            for (let i = 0; i < facePointCount * 0.4; i++) {
+              const t = Math.random() * 2 - 1; // -1 to 1
+              const thickness = Math.random() * 0.05 * size;
+              
+              // Curved smile
+              const x = t * mouthWidth;
+              const y = mouthHeight - mouthCurve * (1 - t * t) - thickness;
+              const z = mouthDepth + Math.random() * 0.05 * size;
+              
+              facePoints.push(x, y, z);
+            }
+            
+            const faceGeometry = new THREE.BufferGeometry();
+            faceGeometry.setAttribute('position', new THREE.Float32BufferAttribute(facePoints, 3));
+            return faceGeometry;
           case 'cylinder':
             // Create a cylinder with high detail for point distribution
             const cylinderGeometry = new THREE.CylinderGeometry(size * 0.7, size * 0.7, size * 2, 32 * density, 32 * density);
@@ -928,6 +1025,11 @@
           const targetRippleIntensity = parseFloat(document.getElementById('rippleIntensity').value) / 10.0;
           const targetRippleSpeed = parseFloat(document.getElementById('rippleSpeed').value);
           
+          // Reset voice mode
+          if (window.customShaderMaterial) {
+            window.customShaderMaterial.uniforms.voiceMode.value = 0.0;
+          }
+          
           // Smoothly transition back to slider values
           const smoothTransition = () => {
             if (!window.customShaderMaterial) return;
@@ -999,6 +1101,14 @@
             // Apply smoothed values to the shader
             window.customShaderMaterial.uniforms.rippleIntensity.value = lastIntensity;
             window.customShaderMaterial.uniforms.rippleSpeed.value = lastSpeed;
+            
+            // Check if current shape is face and set voice mode accordingly
+            const currentShape = document.getElementById('shapeSelect').value;
+            if (currentShape === 'face') {
+              window.customShaderMaterial.uniforms.voiceMode.value = 1.0;
+            } else {
+              window.customShaderMaterial.uniforms.voiceMode.value = 0.0;
+            }
           }
           
           // Continue processing audio
