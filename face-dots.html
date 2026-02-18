@@ -36,6 +36,14 @@
       opacity: 0.5;
       cursor: default;
     }
+    #drop-btn {
+      border-color: #ffaa00;
+      color: #ffaa00;
+    }
+    #drop-btn:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
     .back-link {
       color: cyan;
       font-size: 1rem;
@@ -66,6 +74,7 @@ text-underline-offset:6px;
     </div>
 
     <button id="start-btn" disabled>start camera</button>
+    <button id="drop-btn" disabled>drop dots</button>
 
     <label>
       <span>color</span>
@@ -326,6 +335,7 @@ text-underline-offset:6px;
     const statusEl  = document.getElementById('status-text');
     const badgeEl   = document.getElementById('backend-badge');
     const startBtn  = document.getElementById('start-btn');
+    const dropBtn   = document.getElementById('drop-btn');
 
     let faceLandmarker = null;
     let modelReady     = false;
@@ -393,6 +403,7 @@ text-underline-offset:6px;
         video.play().catch(() => {});
         await new Promise(resolve => { video.onloadeddata = resolve; });
         statusEl.textContent = 'detecting…';
+        dropBtn.disabled = false;
         detectionLoop();
       } catch (err) {
         statusEl.textContent = 'camera error: ' + err.message;
@@ -567,6 +578,51 @@ text-underline-offset:6px;
       geometry.setDrawRange(0, count);
     }
 
+    // ── Drop animation ───────────────────────────────────────────────────────
+    let dropping       = false;
+    let dropVelocities = null;  // Float32Array, [vx, vy] per dot
+    let dropCount      = 0;
+    // At 60fps over 3s = 180 frames, a dot starting at y≈0 needs to reach y≈-6.
+    // With constant gravity g: y = v0*t - 0.5*g*t²  →  g ≈ 2*6/180² ≈ 0.00037 per frame²
+    // But we want it to feel snappy so we use a slightly higher value and let
+    // each dot start with a tiny random downward nudge so they don't all leave at once.
+    const GRAVITY = 0.0007;
+
+    dropBtn.addEventListener('click', () => {
+      const n = geometry.drawRange.count;
+      if (n === 0) return;
+
+      dropCount      = n;
+      dropVelocities = new Float32Array(n * 2); // [vx, vy] per dot
+      for (let i = 0; i < n; i++) {
+        dropVelocities[i * 2 + 0] = (Math.random() - 0.5) * 0.012;  // gentle horizontal drift
+        dropVelocities[i * 2 + 1] = (Math.random() * 0.01) - 0.005; // tiny initial vy scatter
+      }
+
+      latestLandmarks = null;  // stop face-tracking updates
+      dropping        = true;
+      dropBtn.disabled = true;
+    });
+
+    function stepDrop() {
+      if (!dropping) return;
+      let allGone = true;
+      for (let i = 0; i < dropCount; i++) {
+        const base = i * 3;
+        dropVelocities[i * 2 + 1] -= GRAVITY;           // accelerate downward
+        posArray[base + 0] += dropVelocities[i * 2 + 0];
+        posArray[base + 1] += dropVelocities[i * 2 + 1];
+        if (posArray[base + 1] > -8) allGone = false;    // off the bottom of view
+      }
+      geometry.attributes.position.needsUpdate = true;
+      if (allGone) {
+        dropping = false;
+        geometry.setDrawRange(0, 0);
+        geometry.attributes.position.needsUpdate = true;
+        dropBtn.disabled = false;
+      }
+    }
+
     // ── Render loop (always runs at display refresh rate) ────────────────────
     let time = 0;
     function animate() {
@@ -574,7 +630,8 @@ text-underline-offset:6px;
       time += 0.01;
       shaderMaterial.uniforms.time.value = time;
 
-      if (latestLandmarks) updateDots(latestLandmarks);
+      if (!dropping && latestLandmarks) updateDots(latestLandmarks);
+      if (dropping) stepDrop();
 
       renderer.render(scene, camera);
     }
