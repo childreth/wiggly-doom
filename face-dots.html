@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>wigglydoom — not the Lawnmower Man</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    #status-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+      color: rgba(255,255,255,0.7);
+      padding: 0.25rem 0;
+      flex-wrap: wrap;
+    }
+    #backend-badge {
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border: 1px solid #00ffff;
+      color: #00ffff;
+      border-radius: 2px;
+    }
+    #start-btn {
+      border-color: #ff29c3;
+      color: #ff29c3;
+    }
+    #start-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .back-link {
+      color: rgba(255,255,255,0.5);
+      font-size: 0.75rem;
+      text-align: center;
+      text-decoration: none;
+      margin-top: 0.25rem;
+    }
+    .back-link:hover { color: white; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Not the Lawnmower Man</h1>
+  </header>
+
+  <div id="controls">
+    <div id="status-bar">
+      <span id="status-text">loading model…</span>
+      <span id="backend-badge" style="display:none">GPU</span>
+    </div>
+
+    <button id="start-btn" disabled>start camera</button>
+
+    <label>
+      <span>color</span>
+      <select id="colorMode">
+        <option value="rainbow">rainbow</option>
+        <option value="pinkpurple">pink / purple</option>
+        <option value="goldmagenta">gold / blue</option>
+        <option value="cyanlime">cyan / lime</option>
+      </select>
+    </label>
+
+    <label>
+      <span>wiggle intensity</span>
+      <input type="range" id="rippleIntensity" min="0" max="100" step="0.1" value="15">
+    </label>
+
+    <label>
+      <span>wiggle speed</span>
+      <input type="range" id="rippleSpeed" min="0" max="20" step="0.5" value="3">
+    </label>
+
+    <label>
+      <span>gradient start</span>
+      <input type="range" id="gradientStart" min="-4" max="4" step="0.1" value="-2">
+    </label>
+
+    <label>
+      <span>gradient end</span>
+      <input type="range" id="gradientEnd" min="-4" max="4" step="0.1" value="2">
+    </label>
+
+    <label>
+      <span>dot size</span>
+      <input type="range" id="pointSize" min="1" max="16" step="0.5" value="4">
+    </label>
+
+    <label>
+      <span>dot density</span>
+      <input type="range" id="dotDensity" min="0.1" max="5" step="0.1" value="1">
+    </label>
+
+    <label>
+      <span>zoom</span>
+      <input type="range" id="zoom" min="1" max="15" step="0.1" value="5">
+    </label>
+
+    <a class="back-link" href="globe.html">← wigglydoom</a>
+  </div>
+
+  <!-- Hidden webcam feed; MediaPipe reads video frames directly -->
+  <video id="webcam" playsinline autoplay muted style="display:none"></video>
+
+  <!-- Three.js loaded as a global UMD build (no bundler needed) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+
+  <script type="module">
+    // Face landmark detection: MediaPipe Tasks Vision (WebGPU delegate)
+    // Note: Transformers.js v3 does not yet expose a face-landmarks pipeline;
+    // MediaPipe provides the same WebGPU acceleration path in the browser.
+    import { FaceLandmarker, FilesetResolver }
+      from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs";
+
+    // THREE is set on window by the UMD script above and is accessible here.
+
+    // ── Renderer ────────────────────────────────────────────────────────────
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x000000, 0);
+    document.body.appendChild(renderer.domElement);
+
+    // ── Scene / Camera ──────────────────────────────────────────────────────
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(
+      75, window.innerWidth / window.innerHeight, 0.1, 1000
+    );
+    camera.position.z = 5;
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ── Wiggle shader (adapted from globe.html) ─────────────────────────────
+    // Changes vs globe.html:
+    //   • pointSize is now a uniform (controllable via slider)
+    //   • Fragment shader discards corners to render circular dots
+    //   • voiceMode / mouthYPosition removed (not needed for live face)
+    const shaderMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        time:            { value: 0 },
+        colorMode:       { value: 0 },
+        rippleSpeed:     { value: 3.0 },
+        rippleIntensity: { value: 1.5 },  // slider value 15 / 10
+        gradientStart:   { value: -2.0 },
+        gradientEnd:     { value: 2.0 },
+        pointSize:          { value: 4.0 },
+        expressionColor:    { value: new THREE.Color(0, 0, 0) },
+        expressionStrength: { value: 0.0 },
+      },
+      vertexShader: /* glsl */`
+        uniform float time;
+        uniform float rippleSpeed;
+        uniform float rippleIntensity;
+        uniform float pointSize;
+
+        varying vec3  vPosition;
+        varying float vColorFactor;
+
+        void main() {
+          vPosition = position;
+
+          float frequency  = 2.0;
+          float waveHeight = 0.1 * rippleIntensity;
+          float wave =
+            sin(frequency * position.x + time * rippleSpeed) *
+            sin(frequency * position.y + time * rippleSpeed) *
+            sin(frequency * position.z + time * rippleSpeed);
+
+          vec3 displaced = position * (1.0 + wave * waveHeight);
+
+          vColorFactor = wave;
+
+          gl_Position  = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+          gl_PointSize = pointSize;
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform float time;
+        uniform int   colorMode;
+        uniform float gradientStart;
+        uniform float gradientEnd;
+        uniform vec3  expressionColor;
+        uniform float expressionStrength;
+
+        varying vec3  vPosition;
+        varying float vColorFactor;
+
+        vec3 rainbow(float t) {
+          vec3 a = vec3(0.5, 0.5, 0.5);
+          vec3 b = vec3(0.5, 0.5, 0.5);
+          vec3 c = vec3(1.0, 1.0, 1.0);
+          vec3 d = vec3(0.00, 0.33, 0.67);
+          return a + b * cos(6.28318 * (c * t + d));
+        }
+
+        void main() {
+          // Discard corners to render each point as a filled circle
+          vec2 coord = gl_PointCoord - vec2(0.5);
+          if (dot(coord, coord) > 0.25) discard;
+
+          float t = time * 0.5;
+          vec3  color;
+
+          if (colorMode == 0) {
+            color = rainbow(vColorFactor + t);
+          } else if (colorMode == 1) {
+            float g = clamp(
+              (vPosition.y - gradientStart) / (gradientEnd - gradientStart),
+              0.0, 1.0
+            );
+            color = mix(vec3(0.5, 0.0, 1.0), vec3(1.0, 0.161, 0.765), g);
+          } else if (colorMode == 2) {
+            float g = clamp(
+              (vPosition.y - gradientStart) / (gradientEnd - gradientStart),
+              0.0, 1.0
+            );
+            color = mix(vec3(0.0, 0.522, 1.0), vec3(0.996, 0.788, 0.255), g);
+          } else {
+            float g = clamp(
+              (vPosition.y - gradientStart) / (gradientEnd - gradientStart),
+              0.0, 1.0
+            );
+            color = mix(vec3(0.0, 1.0, 1.0), vec3(0.5, 1.0, 0.0), g);
+          }
+
+          color = mix(color, expressionColor, expressionStrength);
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
+      transparent: true,
+      depthWrite:  false,
+    });
+
+    // ── Dynamic geometry pre-allocated for density up to 5× (478 × 5 = 2390) ─
+    const BASE_LANDMARKS = 478;
+    const MAX_COPIES     = 5;
+    const MAX_EXTRA      = BASE_LANDMARKS * (MAX_COPIES - 1); // 1912 extra slots
+    const MAX_LANDMARKS  = BASE_LANDMARKS + MAX_EXTRA;        // 2390 total
+
+    const posArray = new Float32Array(MAX_LANDMARKS * 3);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    geometry.setDrawRange(0, 0);  // empty until first detection
+
+    // Pre-baked random values for barycentric sampling — 5 floats per extra slot:
+    //   [0] landmark index selector  [1] neighbor-1 selector  [2] neighbor-2 offset
+    //   [3] barycentric r1           [4] barycentric r2
+    // Generated once so extra dots sit at stable positions and follow face movement.
+    const randBuf = new Float32Array(MAX_EXTRA * 5);
+    for (let i = 0; i < randBuf.length; i++) randBuf[i] = Math.random();
+
+    // Adjacency list built from FaceLandmarker.FACE_LANDMARKS_TESSELATION after
+    // the model loads. adjacency[i] = array of landmark indices connected to i.
+    let adjacency = null;
+
+    function buildAdjacency() {
+      const conn = FaceLandmarker.FACE_LANDMARKS_TESSELATION;
+      adjacency = Array.from({ length: BASE_LANDMARKS }, () => []);
+      for (const { start, end } of conn) {
+        if (start < BASE_LANDMARKS && end < BASE_LANDMARKS) {
+          adjacency[start].push(end);
+          adjacency[end].push(start);
+        }
+      }
+    }
+
+    const dots = new THREE.Points(geometry, shaderMaterial);
+    scene.add(dots);
+
+    // ── UI → uniform wiring ─────────────────────────────────────────────────
+    const colorMap = { rainbow: 0, pinkpurple: 1, goldmagenta: 2, cyanlime: 3 };
+
+    document.getElementById('colorMode').addEventListener('input', e => {
+      shaderMaterial.uniforms.colorMode.value = colorMap[e.target.value] ?? 0;
+    });
+    document.getElementById('rippleIntensity').addEventListener('input', e => {
+      // Divide by 10 to match globe.html's scaling convention
+      shaderMaterial.uniforms.rippleIntensity.value = parseFloat(e.target.value) / 10.0;
+    });
+    document.getElementById('rippleSpeed').addEventListener('input', e => {
+      shaderMaterial.uniforms.rippleSpeed.value = parseFloat(e.target.value);
+    });
+    document.getElementById('gradientStart').addEventListener('input', e => {
+      shaderMaterial.uniforms.gradientStart.value = parseFloat(e.target.value);
+    });
+    document.getElementById('gradientEnd').addEventListener('input', e => {
+      shaderMaterial.uniforms.gradientEnd.value = parseFloat(e.target.value);
+    });
+    document.getElementById('pointSize').addEventListener('input', e => {
+      shaderMaterial.uniforms.pointSize.value = parseFloat(e.target.value);
+    });
+
+    let dotDensity = 1.0;
+    document.getElementById('dotDensity').addEventListener('input', e => {
+      dotDensity = parseFloat(e.target.value);
+    });
+
+    document.getElementById('zoom').addEventListener('input', e => {
+      camera.position.z = parseFloat(e.target.value);
+    });
+
+    // ── MediaPipe Face Landmarker ────────────────────────────────────────────
+    const statusEl  = document.getElementById('status-text');
+    const badgeEl   = document.getElementById('backend-badge');
+    const startBtn  = document.getElementById('start-btn');
+
+    let faceLandmarker = null;
+    let modelReady     = false;
+
+    async function initDetector() {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+        );
+
+        const modelOptions = {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU",
+          },
+          runningMode:                 "VIDEO",
+          numFaces:                    1,
+          minFaceDetectionConfidence:  0.5,
+          minFacePresenceConfidence:   0.5,
+          minTrackingConfidence:       0.5,
+          outputFaceBlendshapes:       true,
+        };
+
+        // iOS < 17.4 has no WebGPU — GPU delegate throws instead of falling back.
+        // Try GPU first; on failure retry with CPU so the model still loads.
+        try {
+          faceLandmarker = await FaceLandmarker.createFromOptions(vision, modelOptions);
+          badgeEl.textContent   = 'GPU';
+          badgeEl.style.display = 'inline';
+        } catch (_gpuErr) {
+          console.warn('[face-dots] GPU delegate failed, retrying with CPU', _gpuErr);
+          modelOptions.baseOptions.delegate = "CPU";
+          faceLandmarker = await FaceLandmarker.createFromOptions(vision, modelOptions);
+          badgeEl.textContent   = 'CPU';
+          badgeEl.style.display = 'inline';
+        }
+
+        buildAdjacency();
+        modelReady           = true;
+        statusEl.textContent = 'ready — click start camera';
+        startBtn.disabled    = false;
+
+      } catch (err) {
+        statusEl.textContent = 'model error: ' + err.message;
+        console.error('[face-dots] MediaPipe init failed', err);
+      }
+    }
+
+    // ── Webcam ───────────────────────────────────────────────────────────────
+    const video = document.getElementById('webcam');
+
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled    = true;
+      startBtn.textContent = 'camera on';
+      statusEl.textContent = 'requesting camera…';
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+          audio: false,
+        });
+        video.srcObject = stream;
+        // Call play() immediately — before any further awaits — so it remains
+        // within the user-gesture call stack that iOS Safari requires for autoplay.
+        video.play().catch(() => {});
+        await new Promise(resolve => { video.onloadeddata = resolve; });
+        statusEl.textContent = 'detecting…';
+        detectionLoop();
+      } catch (err) {
+        statusEl.textContent = 'camera error: ' + err.message;
+        startBtn.disabled    = false;
+        startBtn.textContent = 'retry camera';
+      }
+    });
+
+    // ── Expression → color mapping ───────────────────────────────────────────
+    // Three expressions are tracked via MediaPipe blendshape scores [0..1]:
+    //   smile    → green   (mouthSmileLeft + mouthSmileRight average)
+    //   mad      → red     (browDownLeft   + browDownRight   average)
+    //   surprised→ yellow  (browInnerUp    + jawOpen         average)
+    // The dominant expression above threshold 0.15 drives expressionColor.
+    // Strength and color LERP toward their targets each detection frame so
+    // transitions feel smooth (~8% per frame at 30fps inference).
+    let currentExprStrength = 0.0;
+    const currentExprColor  = new THREE.Color(0, 0, 0);
+    const targetExprColor   = new THREE.Color(0, 0, 0);
+    let   targetExprStrength = 0.0;
+
+    function applyExpressions(categories) {
+      const bs = {};
+      for (const cat of categories) bs[cat.categoryName] = cat.score;
+
+      const smile     = ((bs.mouthSmileLeft ?? 0) + (bs.mouthSmileRight ?? 0)) * 0.5;
+      const mad       = ((bs.browDownLeft   ?? 0) + (bs.browDownRight   ?? 0)) * 0.5;
+      const surprised = ((bs.browInnerUp    ?? 0) + (bs.jawOpen         ?? 0)) * 0.5;
+
+      const dominant = Math.max(smile, mad, surprised);
+
+      if (dominant > 0.15) {
+        targetExprStrength = Math.min(dominant * 1.5, 0.8);
+        if (smile >= mad && smile >= surprised) {
+          targetExprColor.setRGB(0.0, 1.0, 0.3);   // green — smiling
+        } else if (mad >= surprised) {
+          targetExprColor.setRGB(1.0, 0.1, 0.1);   // red — mad
+        } else {
+          targetExprColor.setRGB(1.0, 0.85, 0.1);  // yellow — surprised
+        }
+      } else {
+        targetExprStrength = 0.0;
+      }
+
+      const lerp = 0.08;
+      currentExprStrength += (targetExprStrength - currentExprStrength) * lerp;
+      currentExprColor.lerp(targetExprColor, lerp);
+
+      shaderMaterial.uniforms.expressionColor.value.copy(currentExprColor);
+      shaderMaterial.uniforms.expressionStrength.value = currentExprStrength;
+    }
+
+    // ── Inference loop (decoupled from render loop) ──────────────────────────
+    // detectForVideo is synchronous but fast on GPU — we guard with lastVideoTime
+    // so we only run inference when a new video frame is actually available.
+    let latestLandmarks = null;
+    let lastVideoTime   = -1;
+    let noFaceCount     = 0;
+
+    function detectionLoop() {
+      if (modelReady && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        try {
+          const result = faceLandmarker.detectForVideo(video, performance.now());
+          if (result.faceLandmarks && result.faceLandmarks.length > 0) {
+            latestLandmarks    = result.faceLandmarks[0];  // array of 478 {x,y,z}
+            noFaceCount        = 0;
+            statusEl.textContent = 'detecting…';
+            if (result.faceBlendshapes?.[0]?.categories) {
+              applyExpressions(result.faceBlendshapes[0].categories);
+            }
+          } else {
+            noFaceCount++;
+            if (noFaceCount === 30) statusEl.textContent = 'no face detected';
+            if (noFaceCount > 60) {
+              // Let dots fade out — stop updating geometry
+              latestLandmarks = null;
+              geometry.setDrawRange(0, 0);
+              geometry.attributes.position.needsUpdate = true;
+            }
+          }
+        } catch (_) {
+          // Per-frame errors (e.g., during video seek) are ignored
+        }
+      }
+      requestAnimationFrame(detectionLoop);
+    }
+
+    // ── Landmark → Three.js world coordinates ────────────────────────────────
+    // MediaPipe normalizes x/y to [0,1] (x: left→right, y: top→bottom).
+    // z is a relative depth value, negative when closer to camera.
+    // We map to Three.js world space centered on the origin:
+    //   x: mirrored (selfie convention — your left is left on screen)
+    //   y: flipped  (image y=0 is screen top; Three.js y=0 is center)
+    //   z: negated  (MediaPipe near = negative z → Three.js near = positive z)
+    //
+    // dotDensity < 1 → subsample: stride through landmarks, fewer total dots
+    // dotDensity > 1 → barycentric super-sample on the face mesh surface:
+    //   For each extra point, pick a landmark + two of its mesh-connected
+    //   neighbors, then sample a uniformly random point inside that triangle.
+    //   This spreads dots over the face surface proportional to local area,
+    //   rather than clumping extra copies on top of already-dense landmarks.
+    //   Pre-baked randBuf ensures stable positions that track face movement.
+    function updateDots(landmarks) {
+      let count = 0;
+
+      // Correct for video pixel aspect ratio so face proportions are accurate.
+      // MediaPipe normalises x to [0,1] over videoWidth and y over videoHeight.
+      // Without correction, a 640×480 feed makes faces appear ~33% too narrow.
+      const videoAspect = (video.videoWidth && video.videoHeight)
+        ? video.videoWidth / video.videoHeight
+        : 4 / 3;
+
+      if (dotDensity <= 1.0) {
+        // Subsample: step through landmarks at stride = 1/density
+        const stride = 1 / dotDensity;
+        for (let f = 0; f < landmarks.length; f += stride) {
+          const lm = landmarks[Math.floor(f)];
+          posArray[count * 3 + 0] =  (0.5 - lm.x) * 4 * videoAspect;
+          posArray[count * 3 + 1] =  (0.5 - lm.y) * 4;
+          posArray[count * 3 + 2] = -lm.z           * 4;
+          count++;
+        }
+      } else {
+        // Always write all base landmarks first
+        for (let i = 0; i < landmarks.length; i++) {
+          const lm = landmarks[i];
+          posArray[count * 3 + 0] =  (0.5 - lm.x) * 4 * videoAspect;
+          posArray[count * 3 + 1] =  (0.5 - lm.y) * 4;
+          posArray[count * 3 + 2] = -lm.z           * 4;
+          count++;
+        }
+
+        if (adjacency) {
+          const extraCount = Math.min(
+            Math.floor((dotDensity - 1) * landmarks.length),
+            MAX_EXTRA
+          );
+
+          for (let e = 0; e < extraCount && count < MAX_LANDMARKS; e++) {
+            const rb = e * 5;
+
+            // Pick base landmark and two distinct mesh-connected neighbors
+            const i    = Math.floor(randBuf[rb]     * landmarks.length) % landmarks.length;
+            const nbrs = adjacency[i];
+            if (!nbrs || nbrs.length < 2) continue;
+
+            const ni = Math.floor(randBuf[rb + 1] * nbrs.length) % nbrs.length;
+            let   nj = Math.floor(randBuf[rb + 2] * (nbrs.length - 1)) % (nbrs.length - 1);
+            if (nj >= ni) nj++;  // ensure ni ≠ nj
+
+            const a = landmarks[i];
+            const b = landmarks[nbrs[ni]];
+            const c = landmarks[nbrs[nj]];
+
+            // Uniform barycentric sampling via the sqrt trick:
+            //   t1 + t2 + t3 = 1, distributed uniformly over the triangle
+            const sqR = Math.sqrt(randBuf[rb + 3]);
+            const t1  = 1 - sqR;
+            const t2  = sqR * (1 - randBuf[rb + 4]);
+            const t3  = sqR *      randBuf[rb + 4];
+
+            posArray[count * 3 + 0] =  (0.5 - (a.x * t1 + b.x * t2 + c.x * t3)) * 4 * videoAspect;
+            posArray[count * 3 + 1] =  (0.5 - (a.y * t1 + b.y * t2 + c.y * t3)) * 4;
+            posArray[count * 3 + 2] = -(      a.z * t1 + b.z * t2 + c.z * t3)    * 4;
+            count++;
+          }
+        }
+      }
+
+      geometry.attributes.position.needsUpdate = true;
+      geometry.setDrawRange(0, count);
+    }
+
+    // ── Render loop (always runs at display refresh rate) ────────────────────
+    let time = 0;
+    function animate() {
+      requestAnimationFrame(animate);
+      time += 0.01;
+      shaderMaterial.uniforms.time.value = time;
+
+      if (latestLandmarks) updateDots(latestLandmarks);
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // ── Boot ─────────────────────────────────────────────────────────────────
+    // Warn on non-secure origins — camera requires HTTPS on mobile Safari/Chrome.
+    // file:// and localhost are exempt. Always attempt to load the model; the
+    // browser's own permission system will block the camera if needed.
+    const isSecure = location.protocol === 'https:'
+                  || location.protocol === 'file:'
+                  || location.hostname === 'localhost'
+                  || location.hostname === '127.0.0.1'
+                  || location.hostname === '::1';
+    if (!isSecure) {
+      statusEl.textContent = 'warning: camera may need HTTPS on mobile';
+      statusEl.style.color = '#ffaa44';
+    }
+    initDetector();
+  </script>
+</body>
+</html>
