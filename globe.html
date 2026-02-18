@@ -15,8 +15,8 @@
     </header>
     <div id="controls">
      
-      <button id="voice-control-btn" style="width: 100%; margin-bottom: 15px; padding: 10px; font-weight: bold; border: 2px solid #ff00ff; background-color: rgba(255, 0, 255, 0.2); color: white; font-size: 16px; cursor: pointer;">
-        🎤 Enable Voice Control
+      <button id="voice-control-btn" style="width: 100%; margin-bottom: 15px; padding: 10px; font-weight: bold; border: 2px solid #ff00ff;  color: white; font-size: 16px; cursor: pointer;">
+        Enable Voice Control
       </button>
       <div id="voice-meter" style="display: none; width: 100%; height: 10px; margin-bottom: 15px; background-color: rgba(255, 255, 255, 0.2); border-radius: 4px; overflow: hidden;">
         <div id="voice-meter-fill" style="height: 100%; width: 0%; background: linear-gradient(to right, #00ffff, #ff00ff); transition: width 0.1s ease-out;"></div>
@@ -968,12 +968,15 @@
         let isVoiceActive = false;
         let animationFrameId;
         
-        // Add smoothing variables
-        let lastIntensity = 0;
-        let lastSpeed = 0;
+        // Envelope follower — asymmetric attack/decay
+        let lastIntensity   = 0;
+        let lastSpeed       = 0;
         let targetIntensity = 0;
-        let targetSpeed = 0;
-        const smoothingFactor = 0.15; // Lower = smoother but slower transitions
+        let targetSpeed     = 0;
+        // Attack: how fast wiggle rises with loud sound (higher = snappier)
+        // Decay:  how long the tail is after going quiet  (lower  = longer fade)
+        const attackRate = 0.22;
+        const decayRate  = 0.035;
         
         // Add click event listener to the voice control button
         voiceButton.addEventListener('click', function() {
@@ -996,7 +999,7 @@
             // Create analyser node
             analyser = audioContext.createAnalyser();
             analyser.fftSize = 256;
-            analyser.smoothingTimeConstant = 0.8;
+            analyser.smoothingTimeConstant = 0.88; // higher = smoother FFT data fed to our envelope
             
             // Connect microphone to analyser
             microphone = audioContext.createMediaStreamSource(stream);
@@ -1105,27 +1108,28 @@
           const meterValue = Math.min(100, normalizedVolume);
           voiceMeterFill.style.width = `${meterValue}%`;
           
-          // Only update if volume is above threshold to avoid noise
-          if (normalizedVolume > 5 && window.customShaderMaterial) {
-            // Set target values based on volume
+          // Set targets — decay smoothly to 0 when quiet rather than freezing
+          if (normalizedVolume > 3) {
             targetIntensity = normalizedVolume / 100;
-            targetSpeed = (normalizedVolume / 100) * 10;
-            
-            // Apply smoothing using linear interpolation (LERP)
-            lastIntensity = lastIntensity + (targetIntensity - lastIntensity) * smoothingFactor;
-            lastSpeed = lastSpeed + (targetSpeed - lastSpeed) * smoothingFactor;
-            
-            // Apply smoothed values to the shader
+            targetSpeed     = (normalizedVolume / 100) * 10;
+          } else {
+            targetIntensity = 0;
+            targetSpeed     = 0;
+          }
+
+          if (window.customShaderMaterial) {
+            // Asymmetric envelope: fast attack, slow decay — no more freeze/jump
+            const rateI = targetIntensity > lastIntensity ? attackRate : decayRate;
+            const rateS = targetSpeed     > lastSpeed     ? attackRate : decayRate;
+
+            lastIntensity += (targetIntensity - lastIntensity) * rateI;
+            lastSpeed     += (targetSpeed     - lastSpeed    ) * rateS;
+
             window.customShaderMaterial.uniforms.rippleIntensity.value = lastIntensity;
-            window.customShaderMaterial.uniforms.rippleSpeed.value = lastSpeed;
-            
-            // Check if current shape is face and set voice mode accordingly
+            window.customShaderMaterial.uniforms.rippleSpeed.value     = lastSpeed;
+
             const currentShape = document.getElementById('shapeSelect').value;
-            if (currentShape === 'face') {
-              window.customShaderMaterial.uniforms.voiceMode.value = 1.0;
-            } else {
-              window.customShaderMaterial.uniforms.voiceMode.value = 0.0;
-            }
+            window.customShaderMaterial.uniforms.voiceMode.value = currentShape === 'face' ? 1.0 : 0.0;
           }
           
           // Continue processing audio
