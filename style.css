@@ -19,6 +19,21 @@ body {
 canvas {
   display: block;
 }
+ .back-link {
+      color: cyan;
+      font-size: 1rem;
+      text-align: center;
+      text-decoration-style: underline;
+      text-decoration-thickness: 2px;
+text-underline-offset:6px;
+
+      margin-top: 0.25rem;
+      position: absolute;
+      left: 16px;
+      top: 20%;
+    }
+    .back-link:hover { color: pink;
+    text-decoration-thickness: 4px; }
 
 header {
   position: fixed;
@@ -37,13 +52,17 @@ header {
 }
 
 h1 {
-
   font-size: 1.5rem;
   color: white;
   line-height: 2rem;
   font-weight: 800;
   text-align: center;
   margin: .25rem 0;
+  text-shadow:
+    0 0 10px #ff29c3,
+    0 0 25px #ff29c3,
+    0 0 60px #c026d3,
+    0 0 120px #7c3aed;
 }
 
 #controls {

@@ -11,20 +11,82 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400..800&display=swap" rel="stylesheet">
     <style>
-      body { margin:0; background: rgb(0,0,23); display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; font-family: 'Syne', sans-serif; gap:1.5rem; }
-      h1   { color:white; font-weight:800; font-size:2rem; margin:0; }
-      .modes { display:flex; gap:1rem; }
-      a.mode { color:white; text-decoration:none; border:1px solid white; padding:0.75rem 1.5rem; font-size:1rem; font-weight:600; transition: border-color 0.15s, color 0.15s; }
-      a.mode:hover { border-color:#ff29c3; color:#ff29c3; }
-      a.mode.face  { border-color:#00ffff; color:#00ffff; }
-      a.mode.face:hover { border-color:white; color:white; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: rgb(0,0,23); height: 100vh; overflow: hidden; font-family: 'Syne', sans-serif; }
+
+      /* Globe iframe fills the entire viewport as background */
+      #bg-frame {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: none;
+        pointer-events: none;
+      }
+
+      /* Landing UI sits on top, centred */
+      #landing {
+        position: relative;
+        z-index: 1;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.5rem;
+      }
+
+      h1 {
+        color: white;
+        font-weight: 800;
+        font-size: 2rem;
+        text-shadow:
+          0 0 10px #ff29c3,
+          0 0 25px #ff29c3,
+          0 0 60px #c026d3,
+          0 0 120px #7c3aed;
+      }
+
+      .modes { display: flex; gap: 1rem; }
+
+      a.mode {
+        color: white;
+        text-decoration: none;
+        border: 1px solid white;
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        font-weight: 600;
+        backdrop-filter: blur(4px);
+        background: rgba(0,0,0,0.35);
+        transition: border-color 0.15s, color 0.15s;
+      }
+      a.mode:hover       { border-color: #ff29c3; color: #ff29c3; }
+      a.mode.face        { border-color: #00ffff; color: #00ffff; }
+      a.mode.face:hover  { border-color: white;   color: white;   }
     </style>
 </head>
 <body>
-    <h1>wigglydoom</h1>
-    <div class="modes">
-      <a class="mode" href="globe.html">Particle Shapes</a>
-      <a class="mode face" href="face-dots.html">Lawnmower Man</a>
+    <!-- Globe visualization as full-screen background -->
+    <iframe id="bg-frame" src="globe.html?embed" title="" tabindex="-1" aria-hidden="true"></iframe>
+
+    <script>
+      // Send normalised mouse position (-1…1) to the background globe iframe
+      const frame = document.getElementById('bg-frame');
+      document.addEventListener('mousemove', e => {
+        frame.contentWindow.postMessage({
+          type: 'mouseRotate',
+          x: (e.clientX / window.innerWidth  - 0.5) * 2,
+          y: (e.clientY / window.innerHeight - 0.5) * 2,
+        }, '*');
+      });
+    </script>
+
+    <div id="landing">
+      <h1>wigglydoom</h1>
+      <div class="modes">
+        <a class="mode" href="globe.html">Particle Shapes</a>
+        <a class="mode face" href="face-dots.html">Lawnmower Man</a>
+      </div>
     </div>
 </body>
 </html>

@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="style.css">
   </head>
   <body>
-    <header>
+    <header><a class="back-link" href="index.html">👈 Particle shapes</a>
       <h1>wigglydoom</h1>
     </header>
     <div id="controls">
@@ -678,15 +678,32 @@
       });
 
       let time = 0;
+      // Mouse-parallax rotation driven by parent page (embed mode)
+      let mouseTargetX = 0, mouseTargetY = 0;
+      let mouseCurrX   = 0, mouseCurrY   = 0;
+      window.addEventListener('message', e => {
+        if (e.data && e.data.type === 'mouseRotate') {
+          mouseTargetX = e.data.y * 0.4;   // tilt up/down  (±0.4 rad ≈ ±23°)
+          mouseTargetY = e.data.x * 0.6;   // swing left/right (±0.6 rad ≈ ±34°)
+        }
+      });
+
       function animate() {
         requestAnimationFrame(animate);
 
         time += 0.01;
         customShaderMaterial.uniforms.time.value = time;
 
+        // Smooth mouse-parallax — lerp and apply the per-frame delta so it
+        // compounds naturally with the existing rotation without drifting.
+        const prevMouseX = mouseCurrX;
+        const prevMouseY = mouseCurrY;
+        mouseCurrX += (mouseTargetX - mouseCurrX) * 0.04;
+        mouseCurrY += (mouseTargetY - mouseCurrY) * 0.04;
+
         // Apply rotation speeds for each axis
-        dotGlobe.rotation.x += rotationSpeedX / 100;
-        dotGlobe.rotation.y += rotationSpeedY / 100;
+        dotGlobe.rotation.x += rotationSpeedX / 100 + (mouseCurrX - prevMouseX);
+        dotGlobe.rotation.y += rotationSpeedY / 100 + (mouseCurrY - prevMouseY);
         dotGlobe.rotation.z += rotationSpeedZ / 100;
 
         // Apply inertia effect after dragging
@@ -1117,6 +1134,31 @@
         
         console.log('Voice control initialized');
       });
+    </script>
+
+    <!-- Embed mode: hide UI and apply preset when loaded as background iframe -->
+    <script>
+      if (new URLSearchParams(location.search).has('embed')) {
+        // Hide chrome
+        document.querySelector('header').style.display    = 'none';
+        document.getElementById('controls').style.display = 'none';
+
+        // Apply Pink & Purple, sphere, large size, sparse density — matching landing screenshot
+        const fire = (id, val, event) => {
+          const el = document.getElementById(id);
+          el.value = val;
+          el.dispatchEvent(new Event(event));
+        };
+
+        fire('colorMode',       'pinkpurple', 'change');
+        fire('shapeSelect',     'sphere',      'change');
+        fire('objectSize',      '5',           'input');
+        fire('particleDensity', '0.3',         'input');
+        fire('rippleSpeed', '3', 'input');
+        // rippleIntensity has no top-level listener (it's inside the voice-control
+        // click handler), so set the uniform directly.
+        customShaderMaterial.uniforms.rippleIntensity.value = 1.8; // 18 / 10
+      }
     </script>
   </body>
 </html>
