@@ -8,183 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400..800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-  <style>
-    header {
-      position: relative;
-    }
-    #status-bar {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.8rem;
-      color: rgba(255,255,255,0.7);
-      padding: 0.25rem 0;
-      flex-wrap: wrap;
-    }
-    #backend-badge {
-      font-size: 0.65rem;
-      padding: 2px 6px;
-      border: 1px solid #00ffff;
-      color: #00ffff;
-      border-radius: 2px;
-    }
-    #start-btn {
-      border-color: #ff29c3;
-      color: #ff29c3;
-    }
-    #start-btn:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-    #drop-btn {
-      border-color: #ffaa00;
-      color: #ffaa00;
-    }
-    #drop-btn:disabled {
-      opacity: 0.3;
-      cursor: default;
-    }
-    #game-btn {
-      border-color: #00ff99;
-      color: #00ff99;
-    }
-    #game-btn:disabled {
-      opacity: 0.3;
-      cursor: default;
-    }
-
-    /* ── Game HUD ── */
-    #game-hud {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      pointer-events: none;
-      z-index: 100;
-      font-family: 'Syne', sans-serif;
-    }
-    #hud-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 24px;
-      background: rgba(0,0,0,0.55);
-      font-size: 1.4rem;
-    }
-    #hud-score { color: #00ff99; font-weight: 700; }
-    #hud-lives { color: #ff4466; font-size: 1.6rem; letter-spacing: 4px; }
-    #hud-mouth {
-      position: fixed;
-      bottom: 18px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: rgba(255,255,255,0.35);
-      font-size: 0.8rem;
-      pointer-events: none;
-    }
-
-    /* ── Overlay screens ── */
-    #game-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.78);
-      z-index: 200;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      font-family: 'Syne', sans-serif;
-      color: #fff;
-      text-align: center;
-      gap: 1.2rem;
-    }
-    #game-overlay.visible { display: flex; }
-    #overlay-title {
-      font-size: 2.6rem;
-      font-weight: 800;
-      color: #ff29c3;
-      text-shadow: 0 0 24px #ff29c3;
-    }
-    #overlay-sub {
-      font-size: 1.1rem;
-      color: rgba(255,255,255,0.7);
-      max-width: 380px;
-      line-height: 1.6;
-    }
-    #overlay-score-line {
-      font-size: 1.8rem;
-      color: #00ff99;
-      font-weight: 700;
-    }
-    #overlay-btn {
-      margin-top: 0.5rem;
-      padding: 0.6rem 2rem;
-      font-family: 'Syne', sans-serif;
-      font-size: 1.1rem;
-      background: transparent;
-      border: 2px solid #00ff99;
-      color: #00ff99;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    #overlay-btn:hover { background: rgba(0,255,153,0.15); }
-
-    /* ── Score pop ── */
-    .score-pop {
-      position: fixed;
-      pointer-events: none;
-      font-family: 'Syne', sans-serif;
-      font-size: 1.8rem;
-      font-weight: 800;
-      color: #00ff99;
-      text-shadow: 0 0 12px #00ff99;
-      z-index: 300;
-      animation: popUp 0.7s ease-out forwards;
-    }
-    @keyframes popUp {
-      0%   { opacity: 1; transform: translateY(0) scale(1); }
-      100% { opacity: 0; transform: translateY(-60px) scale(1.4); }
-    }
-
-    /* ── Miss flash ── */
-    #miss-flash {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 150;
-      background: rgba(255,30,30,0.0);
-      transition: background 0.08s;
-    }
-    #miss-flash.flash { background: rgba(255,30,30,0.35); }
-
-    /* ── Bite flash ── */
-    #bite-flash {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 150;
-      background: rgba(0,255,153,0.0);
-      transition: background 0.08s;
-    }
-    #bite-flash.flash { background: rgba(0,255,153,0.28); }
-
-    .back-link {
-      color: cyan;
-      font-size: 1rem;
-      text-align: center;
-      text-decoration-style: underline;
-      text-decoration-thickness: 2px;
-text-underline-offset:6px;
-
-      margin-top: 0.25rem;
-      position: absolute;
-      left: 16px;
-      top: 20%;
-    }
-    .back-link:hover { color: pink;
-    text-decoration-thickness: 4px; }
-    
-  </style>
+  <link rel="stylesheet" href="style-ntlm.css">
 </head>
 <body>
   <header><a class="back-link" href="index.html">👈 wigglydoom</a>
@@ -254,6 +78,7 @@ text-underline-offset:6px;
     <div id="hud-top">
       <span id="hud-score">score: 0</span>
       <span id="hud-lives">❤️❤️❤️</span>
+      <button id="hud-exit-btn">exit</button>
     </div>
     <div id="hud-mouth">open mouth to bite</div>
   </div>
@@ -263,7 +88,10 @@ text-underline-offset:6px;
     <div id="overlay-title">BITE IT</div>
     <div id="overlay-sub">Food flies past your face.<br>Open your mouth wide to bite it before it escapes!</div>
     <div id="overlay-score-line" style="display:none"></div>
-    <button id="overlay-btn">start game</button>
+    <div id="overlay-buttons">
+      <button id="overlay-btn">start game</button>
+      <button id="exit-btn">exit game</button>
+    </div>
   </div>
 
   <!-- ── Flash overlays ── -->
@@ -783,6 +611,8 @@ text-underline-offset:6px;
     const overlaySub   = document.getElementById('overlay-sub');
     const overlayScore = document.getElementById('overlay-score-line');
     const overlayBtn   = document.getElementById('overlay-btn');
+    const exitBtn      = document.getElementById('exit-btn');
+    const hudExitBtn   = document.getElementById('hud-exit-btn');
     const missFlash    = document.getElementById('miss-flash');
     const biteFlashEl  = document.getElementById('bite-flash');
 
@@ -800,6 +630,17 @@ text-underline-offset:6px;
     overlayBtn.addEventListener('click', () => {
       startGame();
     });
+
+    function exitGame() {
+      gameState = 'idle';
+      gameObjects.forEach(o => scene.remove(o.mesh));
+      gameObjects = [];
+      hudEl.style.display = 'none';
+      overlayEl.classList.remove('visible');
+    }
+
+    exitBtn.addEventListener('click', exitGame);
+    hudExitBtn.addEventListener('click', exitGame);
 
     function startGame() {
       gameScore     = 0;
