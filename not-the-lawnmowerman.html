@@ -44,6 +44,130 @@
       opacity: 0.3;
       cursor: default;
     }
+    #game-btn {
+      border-color: #00ff99;
+      color: #00ff99;
+    }
+    #game-btn:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
+
+    /* ── Game HUD ── */
+    #game-hud {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      pointer-events: none;
+      z-index: 100;
+      font-family: 'Syne', sans-serif;
+    }
+    #hud-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 24px;
+      background: rgba(0,0,0,0.55);
+      font-size: 1.4rem;
+    }
+    #hud-score { color: #00ff99; font-weight: 700; }
+    #hud-lives { color: #ff4466; font-size: 1.6rem; letter-spacing: 4px; }
+    #hud-mouth {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,0.35);
+      font-size: 0.8rem;
+      pointer-events: none;
+    }
+
+    /* ── Overlay screens ── */
+    #game-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.78);
+      z-index: 200;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Syne', sans-serif;
+      color: #fff;
+      text-align: center;
+      gap: 1.2rem;
+    }
+    #game-overlay.visible { display: flex; }
+    #overlay-title {
+      font-size: 2.6rem;
+      font-weight: 800;
+      color: #ff29c3;
+      text-shadow: 0 0 24px #ff29c3;
+    }
+    #overlay-sub {
+      font-size: 1.1rem;
+      color: rgba(255,255,255,0.7);
+      max-width: 380px;
+      line-height: 1.6;
+    }
+    #overlay-score-line {
+      font-size: 1.8rem;
+      color: #00ff99;
+      font-weight: 700;
+    }
+    #overlay-btn {
+      margin-top: 0.5rem;
+      padding: 0.6rem 2rem;
+      font-family: 'Syne', sans-serif;
+      font-size: 1.1rem;
+      background: transparent;
+      border: 2px solid #00ff99;
+      color: #00ff99;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #overlay-btn:hover { background: rgba(0,255,153,0.15); }
+
+    /* ── Score pop ── */
+    .score-pop {
+      position: fixed;
+      pointer-events: none;
+      font-family: 'Syne', sans-serif;
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: #00ff99;
+      text-shadow: 0 0 12px #00ff99;
+      z-index: 300;
+      animation: popUp 0.7s ease-out forwards;
+    }
+    @keyframes popUp {
+      0%   { opacity: 1; transform: translateY(0) scale(1); }
+      100% { opacity: 0; transform: translateY(-60px) scale(1.4); }
+    }
+
+    /* ── Miss flash ── */
+    #miss-flash {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 150;
+      background: rgba(255,30,30,0.0);
+      transition: background 0.08s;
+    }
+    #miss-flash.flash { background: rgba(255,30,30,0.35); }
+
+    /* ── Bite flash ── */
+    #bite-flash {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 150;
+      background: rgba(0,255,153,0.0);
+      transition: background 0.08s;
+    }
+    #bite-flash.flash { background: rgba(0,255,153,0.28); }
+
     .back-link {
       color: cyan;
       font-size: 1rem;
@@ -75,6 +199,7 @@ text-underline-offset:6px;
 
     <button id="start-btn" disabled>start camera</button>
     <button id="drop-btn" disabled>drop dots</button>
+    <button id="game-btn" disabled>play bite game</button>
 
     <label>
       <span>color</span>
@@ -123,6 +248,27 @@ text-underline-offset:6px;
 
     
   </div>
+
+  <!-- ── Game HUD ── -->
+  <div id="game-hud">
+    <div id="hud-top">
+      <span id="hud-score">score: 0</span>
+      <span id="hud-lives">❤️❤️❤️</span>
+    </div>
+    <div id="hud-mouth">open mouth to bite</div>
+  </div>
+
+  <!-- ── Game overlay (start / game-over) ── -->
+  <div id="game-overlay">
+    <div id="overlay-title">BITE IT</div>
+    <div id="overlay-sub">Food flies past your face.<br>Open your mouth wide to bite it before it escapes!</div>
+    <div id="overlay-score-line" style="display:none"></div>
+    <button id="overlay-btn">start game</button>
+  </div>
+
+  <!-- ── Flash overlays ── -->
+  <div id="miss-flash"></div>
+  <div id="bite-flash"></div>
 
   <!-- Hidden webcam feed; MediaPipe reads video frames directly -->
   <video id="webcam" playsinline autoplay muted style="display:none"></video>
@@ -336,6 +482,7 @@ text-underline-offset:6px;
     const badgeEl   = document.getElementById('backend-badge');
     const startBtn  = document.getElementById('start-btn');
     const dropBtn   = document.getElementById('drop-btn');
+    const gameBtn   = document.getElementById('game-btn');
 
     let faceLandmarker = null;
     let modelReady     = false;
@@ -404,6 +551,7 @@ text-underline-offset:6px;
         await new Promise(resolve => { video.onloadeddata = resolve; });
         statusEl.textContent = 'detecting…';
         dropBtn.disabled = false;
+        gameBtn.disabled = false;
         detectionLoop();
       } catch (err) {
         statusEl.textContent = 'camera error: ' + err.message;
@@ -425,9 +573,18 @@ text-underline-offset:6px;
     const targetExprColor   = new THREE.Color(0, 0, 0);
     let   targetExprStrength = 0.0;
 
+    // ── Live jaw/mouth state (read by game) ─────────────────────────────────
+    let jawOpenScore  = 0;   // 0..1 from MediaPipe blendshape
+    let mouthWorldX   = 0;   // Three.js world coords of mouth centre
+    let mouthWorldY   = 0;
+    let mouthHalfW    = 0.18; // half-width of mouth bounding box (world units)
+    let mouthHalfH    = 0.12;
+
     function applyExpressions(categories) {
       const bs = {};
       for (const cat of categories) bs[cat.categoryName] = cat.score;
+
+      jawOpenScore = bs.jawOpen ?? 0;
 
       const smile     = ((bs.mouthSmileLeft ?? 0) + (bs.mouthSmileRight ?? 0)) * 0.5;
       const mad       = ((bs.browDownLeft   ?? 0) + (bs.browDownRight   ?? 0)) * 0.5;
@@ -438,11 +595,11 @@ text-underline-offset:6px;
       if (dominant > 0.15) {
         targetExprStrength = Math.min(dominant * 1.5, 0.8);
         if (smile >= mad && smile >= surprised) {
-          targetExprColor.setRGB(0.0, 1.0, 0.3);   // green — smiling
+          targetExprColor.setRGB(0.0, 1.0, 0.3);
         } else if (mad >= surprised) {
-          targetExprColor.setRGB(1.0, 0.1, 0.1);   // red — mad
+          targetExprColor.setRGB(1.0, 0.1, 0.1);
         } else {
-          targetExprColor.setRGB(1.0, 0.85, 0.1);  // yellow — surprised
+          targetExprColor.setRGB(1.0, 0.85, 0.1);
         }
       } else {
         targetExprStrength = 0.0;
@@ -454,6 +611,25 @@ text-underline-offset:6px;
 
       shaderMaterial.uniforms.expressionColor.value.copy(currentExprColor);
       shaderMaterial.uniforms.expressionStrength.value = currentExprStrength;
+    }
+
+    // Update mouth world position from landmarks each frame
+    function updateMouthPos(landmarks) {
+      if (!landmarks) return;
+      const videoAspect = (video.videoWidth && video.videoHeight)
+        ? video.videoWidth / video.videoHeight : 4 / 3;
+      // 13=upper-lip-centre 14=lower-lip-centre 61=left-corner 291=right-corner
+      const pts = [13, 14, 61, 291].map(i => landmarks[i]);
+      const avgX = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      const avgY = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+      mouthWorldX = (0.5 - avgX) * 4 * videoAspect;
+      mouthWorldY = (0.5 - avgY) * 4;
+      // Mouth width from corners
+      const lx = (0.5 - landmarks[61].x) * 4 * videoAspect;
+      const rx = (0.5 - landmarks[291].x) * 4 * videoAspect;
+      mouthHalfW = Math.abs(lx - rx) * 0.55;
+      // Mouth height scales with jawOpen
+      mouthHalfH = 0.05 + jawOpenScore * 0.25;
     }
 
     // ── Inference loop (decoupled from render loop) ──────────────────────────
@@ -475,6 +651,7 @@ text-underline-offset:6px;
             if (result.faceBlendshapes?.[0]?.categories) {
               applyExpressions(result.faceBlendshapes[0].categories);
             }
+            updateMouthPos(latestLandmarks);
           } else {
             noFaceCount++;
             if (noFaceCount === 30) statusEl.textContent = 'no face detected';
@@ -578,6 +755,213 @@ text-underline-offset:6px;
       geometry.setDrawRange(0, count);
     }
 
+    // ── BITE GAME ────────────────────────────────────────────────────────────
+    const FOOD_ITEMS = ['🍕','🍩','🍎','🌮','🍣','🍦','🍔','🍓','🥑','🍋'];
+    const JAW_THRESHOLD = 0.38;  // jawOpen score needed to register a bite
+
+    const biteSound = new Audio('sounds/bite.mp3');
+    biteSound.volume = 0.7;
+    function playBiteSound() {
+      biteSound.currentTime = 0;
+      biteSound.play().catch(() => {});
+    }
+
+    let gameState   = 'idle';  // idle | playing | gameover
+    let gameScore   = 0;
+    let gameLives   = 3;
+    let gameObjects = [];      // active food meshes
+    let spawnTimer  = 0;
+    let spawnInterval = 120;   // frames between spawns (decreases with score)
+    let gameSpeed   = 0.022;   // world units per frame
+    let biteOnCooldown = false;
+
+    const hudEl        = document.getElementById('game-hud');
+    const hudScoreEl   = document.getElementById('hud-score');
+    const hudLivesEl   = document.getElementById('hud-lives');
+    const overlayEl    = document.getElementById('game-overlay');
+    const overlayTitle = document.getElementById('overlay-title');
+    const overlaySub   = document.getElementById('overlay-sub');
+    const overlayScore = document.getElementById('overlay-score-line');
+    const overlayBtn   = document.getElementById('overlay-btn');
+    const missFlash    = document.getElementById('miss-flash');
+    const biteFlashEl  = document.getElementById('bite-flash');
+
+    // Show start overlay once camera is running
+    gameBtn.addEventListener('click', () => {
+      overlayTitle.textContent = 'BITE IT';
+      overlaySub.textContent   = 'Food flies past your face.\nOpen your mouth wide to bite it before it escapes!';
+      overlaySub.style.whiteSpace = 'pre-line';
+      overlayScore.style.display  = 'none';
+      overlayBtn.textContent      = 'start game';
+      overlayEl.classList.add('visible');
+      gameState = 'idle';
+    });
+
+    overlayBtn.addEventListener('click', () => {
+      startGame();
+    });
+
+    function startGame() {
+      gameScore     = 0;
+      gameLives     = 3;
+      gameObjects.forEach(o => scene.remove(o.mesh));
+      gameObjects   = [];
+      spawnTimer    = 0;
+      spawnInterval = 120;
+      gameSpeed     = 0.022;
+      biteOnCooldown = false;
+      updateHUD();
+      overlayEl.classList.remove('visible');
+      hudEl.style.display = 'block';
+      gameState = 'playing';
+    }
+
+    function endGame() {
+      gameState = 'gameover';
+      gameObjects.forEach(o => scene.remove(o.mesh));
+      gameObjects = [];
+      hudEl.style.display = 'none';
+      overlayTitle.textContent       = 'GAME OVER';
+      overlaySub.textContent         = 'Better luck next time!';
+      overlayScore.style.display     = 'block';
+      overlayScore.textContent       = `score: ${gameScore}`;
+      overlayBtn.textContent         = 'play again';
+      overlayEl.classList.add('visible');
+    }
+
+    function updateHUD() {
+      hudScoreEl.textContent = `score: ${gameScore}`;
+      hudLivesEl.textContent = '❤️'.repeat(gameLives) || '💀';
+    }
+
+    // Build an emoji texture on an offscreen canvas
+    function makeEmojiTexture(emoji) {
+      const size = 128;
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const ctx = c.getContext('2d');
+      ctx.font = `${size * 0.78}px serif`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(emoji, size / 2, size / 2);
+      return new THREE.CanvasTexture(c);
+    }
+
+    function spawnFood() {
+      const emoji   = FOOD_ITEMS[Math.floor(Math.random() * FOOD_ITEMS.length)];
+      const tex     = makeEmojiTexture(emoji);
+      const mat     = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+      const geo     = new THREE.PlaneGeometry(0.38, 0.38);
+      const mesh    = new THREE.Mesh(geo, mat);
+
+      // Spawn off-screen left or right, at a Y near the mouth with some variance
+      const fromLeft = Math.random() < 0.5;
+      const spawnX   = fromLeft ? -3.5 : 3.5;
+      const spawnY   = mouthWorldY + (Math.random() - 0.5) * 0.5;
+      mesh.position.set(spawnX, spawnY, 0.1);
+
+      scene.add(mesh);
+      gameObjects.push({
+        mesh,
+        vx: fromLeft ? gameSpeed : -gameSpeed,
+        scored: false,
+        missed: false,
+      });
+    }
+
+    function triggerMissFlash() {
+      missFlash.classList.add('flash');
+      setTimeout(() => missFlash.classList.remove('flash'), 200);
+    }
+    function triggerBiteFlash() {
+      biteFlashEl.classList.add('flash');
+      setTimeout(() => biteFlashEl.classList.remove('flash'), 180);
+    }
+    function spawnScorePop(screenX, screenY) {
+      const el = document.createElement('div');
+      el.className   = 'score-pop';
+      el.textContent = '+1';
+      el.style.left  = `${screenX}px`;
+      el.style.top   = `${screenY}px`;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 750);
+    }
+
+    // Convert Three.js world XY → screen pixels
+    function worldToScreen(wx, wy) {
+      const v = new THREE.Vector3(wx, wy, 0);
+      v.project(camera);
+      return {
+        x: (v.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-v.y * 0.5 + 0.5) * window.innerHeight,
+      };
+    }
+
+    function tickGame() {
+      if (gameState !== 'playing') return;
+
+      // Spawn
+      spawnTimer++;
+      if (spawnTimer >= spawnInterval) {
+        spawnTimer = 0;
+        spawnFood();
+        // Gradually increase difficulty
+        spawnInterval = Math.max(45, spawnInterval - 1);
+        gameSpeed     = Math.min(0.055, gameSpeed + 0.0003);
+      }
+
+      // Bite detection — one bite per mouth-open gesture
+      const mouthOpen = jawOpenScore > JAW_THRESHOLD;
+      if (!mouthOpen) biteOnCooldown = false;
+
+      const toRemove = [];
+      for (const obj of gameObjects) {
+        obj.mesh.position.x += obj.vx;
+
+        // Check if food is within mouth bounding box
+        const fx = obj.mesh.position.x;
+        const fy = obj.mesh.position.y;
+        const inMouthX = Math.abs(fx - mouthWorldX) < mouthHalfW + 0.12;
+        const inMouthY = Math.abs(fy - mouthWorldY) < mouthHalfH + 0.10;
+
+        if (mouthOpen && !biteOnCooldown && inMouthX && inMouthY && !obj.scored) {
+          // BITE!
+          obj.scored     = true;
+          biteOnCooldown = true;
+          gameScore++;
+          spawnInterval  = Math.max(45, spawnInterval - 2);
+          updateHUD();
+          playBiteSound();
+          triggerBiteFlash();
+          const sp = worldToScreen(fx, fy);
+          spawnScorePop(sp.x, sp.y);
+          toRemove.push(obj);
+        } else if (Math.abs(fx) > 4.2 && !obj.scored) {
+          // Missed — flew off screen
+          obj.missed = true;
+          gameLives--;
+          updateHUD();
+          triggerMissFlash();
+          toRemove.push(obj);
+          if (gameLives <= 0) {
+            toRemove.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
+            endGame();
+            return;
+          }
+        } else if (Math.abs(fx) > 4.2 && obj.scored) {
+          toRemove.push(obj);
+        }
+      }
+
+      for (const obj of toRemove) {
+        scene.remove(obj.mesh);
+        obj.mesh.geometry.dispose();
+        obj.mesh.material.map?.dispose();
+        obj.mesh.material.dispose();
+        gameObjects.splice(gameObjects.indexOf(obj), 1);
+      }
+    }
+
     // ── Drop animation ───────────────────────────────────────────────────────
     let dropping       = false;
     let dropVelocities = null;  // Float32Array, [vx, vy] per dot
@@ -632,6 +1016,7 @@ text-underline-offset:6px;
 
       if (!dropping && latestLandmarks) updateDots(latestLandmarks);
       if (dropping) stepDrop();
+      tickGame();
 
       renderer.render(scene, camera);
     }
