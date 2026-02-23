@@ -594,6 +594,13 @@
       biteSound.play().catch(() => {});
     }
 
+    const gameOverSound = new Audio('sounds/gameover.mp3');
+    gameOverSound.volume = 0.7;
+    function playGameOverSound() {
+      gameOverSound.currentTime = 0;
+      gameOverSound.play().catch(() => {});
+    }
+
     let gameState   = 'idle';  // idle | playing | gameover
     let gameScore   = 0;
     let gameLives   = 3;
@@ -668,6 +675,7 @@
       overlayScore.textContent       = `score: ${gameScore}`;
       overlayBtn.textContent         = 'play again';
       overlayEl.classList.add('visible');
+      playGameOverSound();
     }
 
     function updateHUD() {
