@@ -185,6 +185,52 @@ button:disabled {
 }
 #bite-flash.flash { background: rgba(0,255,153,0.28); }
 
+/* ── Laser recharge bar ── */
+#laser-bar-wrap {
+  position: fixed;
+  bottom: 42px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120px;
+  height: 8px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 100;
+}
+#laser-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: #ff2222;
+  box-shadow: 0 0 8px #ff2222;
+  border-radius: 4px;
+  transition: width 0.05s linear;
+}
+#laser-label {
+  position: fixed;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,34,34,0.5);
+  font-size: 0.65rem;
+  pointer-events: none;
+  z-index: 100;
+  font-family: 'Syne', sans-serif;
+  letter-spacing: 1px;
+}
+
+/* ── Laser flash ── */
+#laser-flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 150;
+  background: rgba(255,34,34,0.0);
+  transition: background 0.06s;
+}
+#laser-flash.flash { background: rgba(255,34,34,0.18); }
+
 .back-link {
   color: cyan;
   font-size: 1rem;

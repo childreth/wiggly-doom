@@ -94,9 +94,16 @@
     </div>
   </div>
 
+  <!-- ── Laser HUD (visible during game) ── -->
+  <div id="laser-label" style="display:none">LASER</div>
+  <div id="laser-bar-wrap" style="display:none">
+    <div id="laser-bar-fill"></div>
+  </div>
+
   <!-- ── Flash overlays ── -->
   <div id="miss-flash"></div>
   <div id="bite-flash"></div>
+  <div id="laser-flash"></div>
 
   <!-- Hidden webcam feed; MediaPipe reads video frames directly -->
   <video id="webcam" playsinline autoplay muted style="display:none"></video>
@@ -126,6 +133,16 @@
       75, window.innerWidth / window.innerHeight, 0.1, 1000
     );
     camera.position.z = 1.5;
+
+    // ── Lights (for 3D food meshes) ──────────────────────────────────────────
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    dirLight.position.set(2, 3, 4);
+    scene.add(dirLight);
+    const rimLight = new THREE.DirectionalLight(0xff66cc, 0.3);
+    rimLight.position.set(-2, -1, 2);
+    scene.add(rimLight);
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
@@ -408,11 +425,22 @@
     let mouthHalfW    = 0.18; // half-width of mouth bounding box (world units)
     let mouthHalfH    = 0.12;
 
+    // ── Live blink / eye / nose state (read by laser) ────────────────────────
+    let blinkLeft     = 0;
+    let blinkRight    = 0;
+    let eyeMidWorld   = new THREE.Vector3();
+    let leftEyeWorld  = new THREE.Vector3();
+    let rightEyeWorld = new THREE.Vector3();
+    let noseTipWorld  = new THREE.Vector3();
+    let aimDir        = new THREE.Vector3(0, 0, -1);
+
     function applyExpressions(categories) {
       const bs = {};
       for (const cat of categories) bs[cat.categoryName] = cat.score;
 
       jawOpenScore = bs.jawOpen ?? 0;
+      blinkLeft   = bs.eyeBlinkLeft  ?? 0;
+      blinkRight  = bs.eyeBlinkRight ?? 0;
 
       const smile     = ((bs.mouthSmileLeft ?? 0) + (bs.mouthSmileRight ?? 0)) * 0.5;
       const mad       = ((bs.browDownLeft   ?? 0) + (bs.browDownRight   ?? 0)) * 0.5;
@@ -458,6 +486,41 @@
       mouthHalfW = Math.abs(lx - rx) * 0.55;
       // Mouth height scales with jawOpen
       mouthHalfH = 0.05 + jawOpenScore * 0.25;
+
+      // Helper to convert MediaPipe landmark to Three.js world space
+      const getPt = (i) => new THREE.Vector3(
+        (0.5 - landmarks[i].x) * 4 * videoAspect,
+        (0.5 - landmarks[i].y) * 4,
+        -landmarks[i].z * 4
+      );
+
+      // Eye origins for laser spawning
+      leftEyeWorld.copy(getPt(159));
+      rightEyeWorld.copy(getPt(386));
+      eyeMidWorld.copy(leftEyeWorld).add(rightEyeWorld).multiplyScalar(0.5);
+
+      // Calculate true 3D face normal
+      const ptTop = getPt(10);  // Forehead
+      const ptBot = getPt(152); // Chin
+      const p234  = getPt(234); // Left cheek (anatomical)
+      const p454  = getPt(454); // Right cheek (anatomical)
+
+      // Ensure ptL is screen-left, ptR is screen-right
+      const ptL = p234.x < p454.x ? p234 : p454;
+      const ptR = p234.x > p454.x ? p234 : p454;
+
+      const vVert = new THREE.Vector3().subVectors(ptTop, ptBot).normalize(); // Points UP
+      const vHorz = new THREE.Vector3().subVectors(ptR, ptL).normalize();     // Points RIGHT
+      
+      // Cross product gives normal pointing OUT toward the camera (+Z)
+      const normal = new THREE.Vector3().crossVectors(vHorz, vVert).normalize();
+
+      // Laser shoots INTO the screen (-Z). Amplify X/Y for gameplay responsiveness.
+      aimDir.set(
+        normal.x * 3.5,
+        normal.y * 3.5,
+        -Math.abs(normal.z)
+      ).normalize();
     }
 
     // ── Inference loop (decoupled from render loop) ──────────────────────────
@@ -584,7 +647,6 @@
     }
 
     // ── BITE GAME ────────────────────────────────────────────────────────────
-    const FOOD_ITEMS = ['🍕','🍩','🍎','🌮','🍣','🍦','🍔','🍓','🥑','🍋'];
     const JAW_THRESHOLD = 0.38;  // jawOpen score needed to register a bite
 
     const biteSound = new Audio('sounds/bite.mp3');
@@ -593,6 +655,163 @@
       biteSound.currentTime = 0;
       biteSound.play().catch(() => {});
     }
+
+    // ── 3D Food Builders ────────────────────────────────────────────────────
+    function makeFoodApple() {
+      const group = new THREE.Group();
+      const bodyGeo = new THREE.SphereGeometry(0.15, 12, 10);
+      bodyGeo.scale(1, 1.1, 1);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0xe03030, roughness: 0.35, metalness: 0.05 });
+      group.add(new THREE.Mesh(bodyGeo, bodyMat));
+      const stemGeo = new THREE.CylinderGeometry(0.012, 0.015, 0.07, 6);
+      const stemMat = new THREE.MeshStandardMaterial({ color: 0x5c3a1e });
+      const stem = new THREE.Mesh(stemGeo, stemMat);
+      stem.position.y = 0.16;
+      group.add(stem);
+      const leafGeo = new THREE.SphereGeometry(0.04, 6, 4);
+      leafGeo.scale(1, 0.3, 0.6);
+      const leafMat = new THREE.MeshStandardMaterial({ color: 0x33aa33 });
+      const leaf = new THREE.Mesh(leafGeo, leafMat);
+      leaf.position.set(0.03, 0.16, 0);
+      leaf.rotation.z = -0.5;
+      group.add(leaf);
+      return group;
+    }
+
+    function makeFoodDonut() {
+      const group = new THREE.Group();
+      const torusGeo = new THREE.TorusGeometry(0.11, 0.055, 12, 20);
+      const torusMat = new THREE.MeshStandardMaterial({ color: 0xd4943a, roughness: 0.5 });
+      group.add(new THREE.Mesh(torusGeo, torusMat));
+      const icingGeo = new THREE.TorusGeometry(0.11, 0.045, 12, 20, Math.PI);
+      const icingMat = new THREE.MeshStandardMaterial({ color: 0xff7eb3, roughness: 0.3 });
+      const icing = new THREE.Mesh(icingGeo, icingMat);
+      icing.rotation.x = Math.PI * 0.5;
+      icing.position.y = 0.02;
+      group.add(icing);
+      return group;
+    }
+
+    function makeFoodBurger() {
+      const group = new THREE.Group();
+      const bunGeo = new THREE.SphereGeometry(0.14, 10, 8);
+      bunGeo.scale(1, 0.5, 1);
+      const bunMat = new THREE.MeshStandardMaterial({ color: 0xd4943a, roughness: 0.6 });
+      const topBun = new THREE.Mesh(bunGeo, bunMat);
+      topBun.position.y = 0.06;
+      group.add(topBun);
+      const bottomBun = new THREE.Mesh(bunGeo.clone(), bunMat);
+      bottomBun.position.y = -0.06;
+      bottomBun.scale.y = 0.7;
+      group.add(bottomBun);
+      const pattyGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.035, 12);
+      const pattyMat = new THREE.MeshStandardMaterial({ color: 0x5c3322, roughness: 0.7 });
+      const patty = new THREE.Mesh(pattyGeo, pattyMat);
+      group.add(patty);
+      const lettuceGeo = new THREE.CylinderGeometry(0.14, 0.12, 0.02, 10);
+      const lettuceMat = new THREE.MeshStandardMaterial({ color: 0x55cc44, roughness: 0.5 });
+      const lettuce = new THREE.Mesh(lettuceGeo, lettuceMat);
+      lettuce.position.y = 0.025;
+      group.add(lettuce);
+      return group;
+    }
+
+    function makeFoodPizza() {
+      const group = new THREE.Group();
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.lineTo(-0.13, -0.22);
+      shape.lineTo(0.13, -0.22);
+      shape.closePath();
+      const extrudeSettings = { depth: 0.03, bevelEnabled: true, bevelThickness: 0.01, bevelSize: 0.01, bevelSegments: 2 };
+      const sliceGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+      const sliceMat = new THREE.MeshStandardMaterial({ color: 0xf5c842, roughness: 0.5 });
+      const slice = new THREE.Mesh(sliceGeo, sliceMat);
+      slice.position.y = 0.08;
+      group.add(slice);
+      const sauceGeo = new THREE.CircleGeometry(0.04, 8);
+      const sauceMat = new THREE.MeshStandardMaterial({ color: 0xcc2222 });
+      for (let i = 0; i < 3; i++) {
+        const dot = new THREE.Mesh(sauceGeo, sauceMat);
+        dot.position.set((Math.random() - 0.5) * 0.1, (Math.random() - 0.5) * 0.08 - 0.04, 0.04);
+        group.add(dot);
+      }
+      return group;
+    }
+
+    function makeFoodStrawberry() {
+      const group = new THREE.Group();
+      const bodyGeo = new THREE.ConeGeometry(0.1, 0.22, 10);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdd2244, roughness: 0.4 });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.rotation.x = Math.PI;
+      group.add(body);
+      const leafGeo = new THREE.ConeGeometry(0.08, 0.04, 6);
+      const leafMat = new THREE.MeshStandardMaterial({ color: 0x33aa33 });
+      const leaves = new THREE.Mesh(leafGeo, leafMat);
+      leaves.position.y = 0.12;
+      group.add(leaves);
+      return group;
+    }
+
+    function makeFoodAvocado() {
+      const group = new THREE.Group();
+      const bodyGeo = new THREE.SphereGeometry(0.13, 10, 10);
+      bodyGeo.scale(0.8, 1.2, 0.6);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4a7a2e, roughness: 0.5 });
+      group.add(new THREE.Mesh(bodyGeo, bodyMat));
+      const pitGeo = new THREE.SphereGeometry(0.055, 8, 8);
+      const pitMat = new THREE.MeshStandardMaterial({ color: 0x7a5c2e, roughness: 0.4 });
+      const pit = new THREE.Mesh(pitGeo, pitMat);
+      pit.position.z = 0.06;
+      group.add(pit);
+      return group;
+    }
+
+    function makeFoodLemon() {
+      const group = new THREE.Group();
+      const bodyGeo = new THREE.SphereGeometry(0.12, 10, 10);
+      bodyGeo.scale(1.3, 1, 1);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0xf5e642, roughness: 0.35 });
+      group.add(new THREE.Mesh(bodyGeo, bodyMat));
+      const tipGeo = new THREE.ConeGeometry(0.03, 0.04, 6);
+      const tipMat = new THREE.MeshStandardMaterial({ color: 0xe0d030 });
+      const tipL = new THREE.Mesh(tipGeo, tipMat);
+      tipL.rotation.z = Math.PI / 2;
+      tipL.position.x = 0.15;
+      group.add(tipL);
+      const tipR = new THREE.Mesh(tipGeo.clone(), tipMat);
+      tipR.rotation.z = -Math.PI / 2;
+      tipR.position.x = -0.15;
+      group.add(tipR);
+      return group;
+    }
+
+    function makeFoodIceCream() {
+      const group = new THREE.Group();
+      const coneGeo = new THREE.ConeGeometry(0.09, 0.2, 10);
+      const coneMat = new THREE.MeshStandardMaterial({ color: 0xc8a050, roughness: 0.6 });
+      const cone = new THREE.Mesh(coneGeo, coneMat);
+      cone.position.y = -0.06;
+      group.add(cone);
+      const scoopGeo = new THREE.SphereGeometry(0.1, 10, 10);
+      const scoopMat = new THREE.MeshStandardMaterial({ color: 0xffc0cb, roughness: 0.3 });
+      const scoop = new THREE.Mesh(scoopGeo, scoopMat);
+      scoop.position.y = 0.1;
+      group.add(scoop);
+      return group;
+    }
+
+    const FOOD_BUILDERS = [
+      makeFoodApple,
+      makeFoodDonut,
+      makeFoodBurger,
+      makeFoodPizza,
+      makeFoodStrawberry,
+      makeFoodAvocado,
+      makeFoodLemon,
+      makeFoodIceCream,
+    ];
 
     const gameOverSound = new Audio('sounds/gameover.mp3');
     gameOverSound.volume = 0.7;
@@ -603,7 +822,7 @@
 
     let gameState   = 'idle';  // idle | playing | gameover
     let gameScore   = 0;
-    let gameLives   = 3;
+    let gameLives   = 10;
     let gameObjects = [];      // active food meshes
     let spawnTimer  = 0;
     let spawnInterval = 120;   // frames between spawns (decreases with score)
@@ -643,6 +862,7 @@
       gameObjects.forEach(o => scene.remove(o.mesh));
       gameObjects = [];
       hudEl.style.display = 'none';
+      showLaserHUD(false);
       overlayEl.classList.remove('visible');
     }
 
@@ -656,11 +876,12 @@
       gameObjects   = [];
       spawnTimer    = 0;
       spawnInterval = 120;
-      gameSpeed     = 0.022;
+      gameSpeed     = 0.011;
       biteOnCooldown = false;
       updateHUD();
       overlayEl.classList.remove('visible');
       hudEl.style.display = 'block';
+      showLaserHUD(true);
       gameState = 'playing';
     }
 
@@ -669,6 +890,7 @@
       gameObjects.forEach(o => scene.remove(o.mesh));
       gameObjects = [];
       hudEl.style.display = 'none';
+      showLaserHUD(false);
       overlayTitle.textContent       = 'GAME OVER';
       overlaySub.textContent         = 'Better luck next time!';
       overlayScore.style.display     = 'block';
@@ -683,36 +905,36 @@
       hudLivesEl.textContent = '❤️'.repeat(gameLives) || '💀';
     }
 
-    // Build an emoji texture on an offscreen canvas
-    function makeEmojiTexture(emoji) {
-      const size = 128;
-      const c = document.createElement('canvas');
-      c.width = c.height = size;
-      const ctx = c.getContext('2d');
-      ctx.font = `${size * 0.78}px serif`;
-      ctx.textAlign    = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(emoji, size / 2, size / 2);
-      return new THREE.CanvasTexture(c);
+    function disposeGroup(group) {
+      group.traverse(child => {
+        if (child.isMesh) {
+          child.geometry.dispose();
+          if (child.material.map) child.material.map.dispose();
+          child.material.dispose();
+        }
+      });
     }
 
     function spawnFood() {
-      const emoji   = FOOD_ITEMS[Math.floor(Math.random() * FOOD_ITEMS.length)];
-      const tex     = makeEmojiTexture(emoji);
-      const mat     = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
-      const geo     = new THREE.PlaneGeometry(0.38, 0.38);
-      const mesh    = new THREE.Mesh(geo, mat);
+      const builder = FOOD_BUILDERS[Math.floor(Math.random() * FOOD_BUILDERS.length)];
+      const mesh    = builder();
 
-      // Spawn off-screen left or right, at a Y near the mouth with some variance
+      // Spawn off-screen left or right, spread across full vertical range
       const fromLeft = Math.random() < 0.5;
       const spawnX   = fromLeft ? -3.5 : 3.5;
-      const spawnY   = mouthWorldY + (Math.random() - 0.5) * 0.5;
+      const spawnY   = (Math.random() - 0.5) * 3.0;  // -1.5 to +1.5 world units
       mesh.position.set(spawnX, spawnY, 0.1);
+
+      // Random spin axis for tumble effect
+      const spinX = (Math.random() - 0.5) * 0.06;
+      const spinY = (Math.random() - 0.5) * 0.06;
+      const spinZ = (Math.random() - 0.5) * 0.06;
 
       scene.add(mesh);
       gameObjects.push({
         mesh,
         vx: fromLeft ? gameSpeed : -gameSpeed,
+        spinX, spinY, spinZ,
         scored: false,
         missed: false,
       });
@@ -746,8 +968,219 @@
       };
     }
 
+    // ── LASER WEAPON ──────────────────────────────────────────────────────────
+    const BLINK_THRESHOLD  = 0.45;
+    const LASER_COOLDOWN   = 30;   // frames (~0.5s at 60fps)
+    const LASER_BEAM_LEN   = 28;   // Increased from 18 to extend way off-screen
+    const LASER_VISIBLE_MS = 150;
+
+    let laserCooldown   = 0;
+    let blinkWasOpen    = true;  // debounce: must open eyes before next shot
+    let activeLaserMesh = null;
+    let laserFadeTimer  = null;
+
+    const laserFlashEl  = document.getElementById('laser-flash');
+    const laserBarWrap  = document.getElementById('laser-bar-wrap');
+    const laserBarFill  = document.getElementById('laser-bar-fill');
+    const laserLabelEl  = document.getElementById('laser-label');
+    const laserRaycaster = new THREE.Raycaster();
+    laserRaycaster.near = 0;
+    laserRaycaster.far  = LASER_BEAM_LEN;
+
+    function showLaserHUD(show) {
+      laserBarWrap.style.display = show ? 'block' : 'none';
+      laserLabelEl.style.display = show ? 'block' : 'none';
+    }
+
+    function updateLaserBar() {
+      if (laserCooldown <= 0) {
+        laserBarFill.style.width = '100%';
+      } else {
+        laserBarFill.style.width = `${((LASER_COOLDOWN - laserCooldown) / LASER_COOLDOWN) * 100}%`;
+      }
+    }
+
+    function makeBeam(origin, dir) {
+      // CylinderGeometry(radiusTop, radiusBottom, height, radialSegments, heightSegments, openEnded)
+      // Top is far end, bottom is origin. Make top much wider for dramatic cone effect.
+      const beamGeo = new THREE.CylinderGeometry(0.7, 0.005, LASER_BEAM_LEN, 6, 1, true);
+      const beamMat = new THREE.MeshBasicMaterial({
+        color: 0xff2222,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,
+      });
+      const beam = new THREE.Mesh(beamGeo, beamMat);
+      const up = new THREE.Vector3(0, 1, 0);
+      beam.quaternion.setFromUnitVectors(up, dir);
+      beam.position.copy(origin).add(dir.clone().multiplyScalar(LASER_BEAM_LEN * 0.5));
+      scene.add(beam);
+
+      // Glow core (wider still, more transparent)
+      const glowGeo = new THREE.CylinderGeometry(1.2, 0.015, LASER_BEAM_LEN, 6, 1, true);
+      const glowMat = new THREE.MeshBasicMaterial({
+        color: 0xff4444,
+        transparent: true,
+        opacity: 0.25,
+        depthWrite: false,
+      });
+      const glow = new THREE.Mesh(glowGeo, glowMat);
+      glow.quaternion.copy(beam.quaternion);
+      glow.position.copy(beam.position);
+      scene.add(glow);
+
+      return { beam, glow };
+    }
+
+    function fireLaser() {
+      const dir = aimDir.clone();
+      const offsetDir = aimDir.clone().multiplyScalar(0.05);
+
+      // Two beams — one from each eye, angled outward
+      const originL = leftEyeWorld.clone().add(offsetDir);
+      const originR = rightEyeWorld.clone().add(offsetDir);
+      
+      // Calculate outward spread directions based on eye positions relative to mid
+      const eyeToEye = new THREE.Vector3().subVectors(rightEyeWorld, leftEyeWorld).normalize();
+      
+      // Left beam angles left (-eyeToEye), right beam angles right (+eyeToEye)
+      const OUTWARD_ANGLE = 0.22;  // Increased spread from 0.18 to 0.22
+      const dirL = dir.clone().add(eyeToEye.clone().multiplyScalar(-OUTWARD_ANGLE)).normalize();
+      const dirR = dir.clone().add(eyeToEye.clone().multiplyScalar(OUTWARD_ANGLE)).normalize();
+
+      const beamL = makeBeam(originL, dirL);
+      const beamR = makeBeam(originR, dirR);
+
+      // Point lights at each eye for red glow on face dots
+      const flashL = new THREE.PointLight(0xff2222, 3, 1.5);
+      flashL.position.copy(originL);
+      scene.add(flashL);
+      const flashR = new THREE.PointLight(0xff2222, 3, 1.5);
+      flashR.position.copy(originR);
+      scene.add(flashR);
+
+      // Screen flash
+      laserFlashEl.classList.add('flash');
+      setTimeout(() => laserFlashEl.classList.remove('flash'), 120);
+
+      // Fade out beams after LASER_VISIBLE_MS
+      if (laserFadeTimer) clearTimeout(laserFadeTimer);
+      laserFadeTimer = setTimeout(() => {
+        [beamL, beamR].forEach(b => {
+          scene.remove(b.beam); b.beam.geometry.dispose(); b.beam.material.dispose();
+          scene.remove(b.glow); b.glow.geometry.dispose(); b.glow.material.dispose();
+        });
+        scene.remove(flashL); flashL.dispose();
+        scene.remove(flashR); flashR.dispose();
+        activeLaserMesh = null;
+      }, LASER_VISIBLE_MS);
+
+      // Cone-spread raycasting — fan of rays around each beam for forgiving hits
+      // Increased spread angle to match the visually wider cone
+      const SPREAD_ANGLE = 0.20;  // radians (~11.5°) half-cone - increased significantly
+      
+      const getSpreadDirs = (baseDir) => {
+        const spreadDirs = [baseDir.clone()];
+        const arbitrary = Math.abs(baseDir.y) < 0.9 ? new THREE.Vector3(0,1,0) : new THREE.Vector3(1,0,0);
+        const perp1 = new THREE.Vector3().crossVectors(baseDir, arbitrary).normalize();
+        const perp2 = new THREE.Vector3().crossVectors(baseDir, perp1).normalize();
+        for (let i = 0; i < 8; i++) {
+          const angle = (i / 8) * Math.PI * 2;
+          const offset = perp1.clone().multiplyScalar(Math.cos(angle) * SPREAD_ANGLE)
+                    .add(perp2.clone().multiplyScalar(Math.sin(angle) * SPREAD_ANGLE));
+          spreadDirs.push(baseDir.clone().add(offset).normalize());
+        }
+        return spreadDirs;
+      };
+
+      const spreadDirsL = getSpreadDirs(dirL);
+      const spreadDirsR = getSpreadDirs(dirR);
+
+      const foodMeshes = [];
+      for (const obj of gameObjects) {
+        obj.mesh.traverse(child => {
+          if (child.isMesh) foodMeshes.push({ child, obj });
+        });
+      }
+      const allChildren = foodMeshes.map(f => f.child);
+
+      // Try all spread rays from both eyes
+      let hitObj = null;
+      const beamConfigs = [
+        { origin: originL, dirs: spreadDirsL, baseDir: dirL },
+        { origin: originR, dirs: spreadDirsR, baseDir: dirR }
+      ];
+      
+      outer:
+      for (const config of beamConfigs) {
+        for (const d of config.dirs) {
+          laserRaycaster.set(config.origin, d);
+          const intersects = laserRaycaster.intersectObjects(allChildren, false);
+          if (intersects.length > 0) {
+            const hitChild = intersects[0].object;
+            hitObj = foodMeshes.find(f => f.child === hitChild)?.obj;
+            if (hitObj && !hitObj.scored) break outer;
+            hitObj = null;
+          }
+        }
+      }
+
+      // Proximity fallback — check if any food is close to either beam line
+      if (!hitObj) {
+        const PROX_RADIUS = 0.8;  // world units — doubled to match huge beams
+        for (const config of beamConfigs) {
+          for (const obj of gameObjects) {
+            if (obj.scored) continue;
+            const toFood = obj.mesh.position.clone().sub(config.origin);
+            const along  = toFood.dot(config.baseDir);
+            if (along < 0 || along > LASER_BEAM_LEN) continue;
+            const closest = config.origin.clone().add(config.baseDir.clone().multiplyScalar(along));
+            const dist = closest.distanceTo(obj.mesh.position);
+            if (dist < PROX_RADIUS) {
+              hitObj = obj;
+              break;
+            }
+          }
+          if (hitObj) break;
+        }
+      }
+
+      if (hitObj && !hitObj.scored) {
+        hitObj.scored = true;
+        gameScore++;
+        updateHUD();
+        playBiteSound();
+        const sp = worldToScreen(hitObj.mesh.position.x, hitObj.mesh.position.y);
+        spawnScorePop(sp.x, sp.y);
+        scene.remove(hitObj.mesh);
+        disposeGroup(hitObj.mesh);
+        gameObjects.splice(gameObjects.indexOf(hitObj), 1);
+      }
+
+      laserCooldown = LASER_COOLDOWN;
+    }
+
+    function tickLaser() {
+      if (gameState !== 'playing') return;
+
+      if (laserCooldown > 0) laserCooldown--;
+      updateLaserBar();
+
+      // Detect blink: either eye > threshold, with debounce (must open before next shot)
+      const blinking = blinkLeft > BLINK_THRESHOLD || blinkRight > BLINK_THRESHOLD;
+      if (!blinking) {
+        blinkWasOpen = true;
+      }
+      if (blinking && blinkWasOpen && laserCooldown <= 0) {
+        blinkWasOpen = false;
+        fireLaser();
+      }
+    }
+
     function tickGame() {
       if (gameState !== 'playing') return;
+
+      tickLaser();
 
       // Spawn
       spawnTimer++;
@@ -756,7 +1189,7 @@
         spawnFood();
         // Gradually increase difficulty
         spawnInterval = Math.max(45, spawnInterval - 1);
-        gameSpeed     = Math.min(0.055, gameSpeed + 0.0003);
+        gameSpeed     = Math.min(0.028, gameSpeed + 0.00015);
       }
 
       // Bite detection — one bite per mouth-open gesture
@@ -766,6 +1199,9 @@
       const toRemove = [];
       for (const obj of gameObjects) {
         obj.mesh.position.x += obj.vx;
+        obj.mesh.rotation.x += obj.spinX;
+        obj.mesh.rotation.y += obj.spinY;
+        obj.mesh.rotation.z += obj.spinZ;
 
         // Check if food is within mouth bounding box
         const fx = obj.mesh.position.x;
@@ -781,7 +1217,6 @@
           spawnInterval  = Math.max(45, spawnInterval - 2);
           updateHUD();
           playBiteSound();
-          triggerBiteFlash();
           const sp = worldToScreen(fx, fy);
           spawnScorePop(sp.x, sp.y);
           toRemove.push(obj);
@@ -793,7 +1228,7 @@
           triggerMissFlash();
           toRemove.push(obj);
           if (gameLives <= 0) {
-            toRemove.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); o.mesh.material.dispose(); });
+            toRemove.forEach(o => { scene.remove(o.mesh); disposeGroup(o.mesh); });
             endGame();
             return;
           }
@@ -804,9 +1239,7 @@
 
       for (const obj of toRemove) {
         scene.remove(obj.mesh);
-        obj.mesh.geometry.dispose();
-        obj.mesh.material.map?.dispose();
-        obj.mesh.material.dispose();
+        disposeGroup(obj.mesh);
         gameObjects.splice(gameObjects.indexOf(obj), 1);
       }
     }
